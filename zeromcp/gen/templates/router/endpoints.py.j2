@@ -1,0 +1,21 @@
+"""Endpoint registry for {{ config.project.name }}.
+
+Maps URL patterns to ``BaseResource`` subclasses. Imported by
+``router/urls.py`` and handed to ``zeromcp.get_routes()``.
+"""
+{% for module_name, members in grouped.items() %}
+from modules.{{ module_name }}.resources import (
+{% for class_name, _, _ in members %}
+    {{ class_name }}Resource,
+{% endfor %}
+)
+{% endfor %}
+
+
+endpoints = {
+{% for module_name, members in grouped.items() %}
+{% for class_name, tcfg, _ in members %}
+    r'{{ tcfg.db_table }}(.*)$': {{ class_name }}Resource,
+{% endfor %}
+{% endfor %}
+}

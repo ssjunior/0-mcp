@@ -1,0 +1,74 @@
+[build-system]
+requires = [
+    "Django>=5.0",
+    "pandas",
+    "pytz",
+    "redis",
+    "setuptools>=77",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-zeromcp"
+version = "1.0.0"
+authors = [
+  { name="Stamatios Stamou Jr", email="bushier.outsets.0c@icloud.com" },
+]
+description = "Zero-effort MCP server (and REST API) generator from Django models."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE*"]
+requires-python = ">=3.10"
+dependencies = [
+    "Django>=5.0",
+    "redis",
+    "pandas",
+    "pytz",
+    "jsonschema>=4",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+# Pydantic schemas for input validation and response shaping. Without
+# this extra the framework infers schemas straight from Django models.
+schemas = ["pydantic>=2"]
+# Project-from-database introspection / generator (``0-mcp init``).
+# Jinja2 + PyYAML are required for any generation flow; ``gen-postgres``
+# / ``gen-mysql`` add a database driver on top (the framework also
+# auto-detects ``mysqlclient`` / ``psycopg2`` if you already have one).
+gen = ["jinja2>=3", "PyYAML>=6"]
+gen-postgres = ["jinja2>=3", "PyYAML>=6", "psycopg2-binary>=2.9"]
+gen-mysql = ["jinja2>=3", "PyYAML>=6", "PyMySQL>=1.1"]
+dev = [
+    "pytest>=7",
+    "pytest-asyncio>=0.21",
+    "fakeredis>=2.20",
+    "jinja2>=3",
+    "PyYAML>=6",
+]
+
+[project.scripts]
+"0-mcp" = "zeromcp.gen.cli:main"
+zeromcp = "zeromcp.gen.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[project.urls]
+"Homepage" = "https://github.com/ssjunior/0-mcp"
+"Bug Tracker" = "https://github.com/ssjunior/0-mcp/issues"
+
+[tool.setuptools.packages.find]
+include = ["zeromcp*"]
+exclude = ["site*", "tests*", "dist*", "build*"]
+
+[tool.setuptools.package-data]
+"zeromcp.gen" = ["templates/**/*.j2", "templates/**/*"]

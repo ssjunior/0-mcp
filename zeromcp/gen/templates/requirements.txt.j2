@@ -1,0 +1,11 @@
+Django>=5.2
+{% if zeromcp_editable_path %}
+-e {{ zeromcp_editable_path }}
+{% else %}
+django-zeromcp
+{% endif %}
+{% if config.project.backend == 'postgres' %}
+psycopg2-binary>=2.9
+{% elif config.project.backend == 'mysql' %}
+mysqlclient>=2.2
+{% endif %}

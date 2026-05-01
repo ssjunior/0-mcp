@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.python-version
+.venv/
+venv/
+env/
+
+# Editor / IDE
+.idea/
+.vscode/
+.claude/
+CLAUDE.md
+AGENTS.md
+.cursorrules
+.cursor/
+.aider*
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Backups
+*.bkp
+*.bkp/
+*.bak
+
+# Marketing site (separate concern)
+site/

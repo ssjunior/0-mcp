@@ -1,0 +1,8 @@
+"""Django app config for the ``{{ module_name }}`` module."""
+from django.apps import AppConfig
+
+
+class {{ class_name }}Config(AppConfig):
+    name = 'modules.{{ module_name }}'
+    label = '{{ module_name }}'
+    default_auto_field = 'django.db.models.BigAutoField'
