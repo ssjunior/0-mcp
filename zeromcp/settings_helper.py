@@ -47,3 +47,11 @@ def get_cookie_id():
 
 def get_token_max_drift_ms():
     return get_setting('TOKEN_MAX_DRIFT_MS', default=30000)
+
+
+def get_session_ttl():
+    return get_setting('SESSION_TTL', default=1800)
+
+
+def get_api_session_ttl():
+    return get_setting('API_SESSION_TTL', default=300)

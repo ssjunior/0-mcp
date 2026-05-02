@@ -60,6 +60,15 @@ MCP = {
     # Flip to ``True`` and configure ``TENANT_USER_API_MODEL`` (or set
     # ``authenticated = True`` per resource) before deploying.
     'DEFAULT_AUTHENTICATED': False,
+    # Sliding TTLs (seconds) for cached sessions. Each authenticated
+    # request renews the TTL via Redis ``GETEX`` — idle keys expire
+    # naturally after the window.
+    # 'SESSION_TTL': 1800,         # cookie session (default 30 min)
+    # 'API_SESSION_TTL': 300,      # api-key session cache (default 5 min)
+    # Anti-CSRF for cookie auth — set at least one of the two:
+    #   - ``ENFORCE_TOKEN = True`` enables HMAC anti-replay (X-Token).
+    #   - ``ALLOWED_ORIGINS`` enforces an Origin allowlist.
+    # Without either, the framework logs a startup warning.
     # 'ALLOWED_ORIGINS': ['app.example.com'],
     # 'TRUSTED_PROXIES': ['10.0.0.0/8'],
     # 'CACHE_TTL': 60,

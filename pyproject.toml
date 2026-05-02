@@ -3,7 +3,7 @@ requires = [
     "Django>=5.0",
     "pandas",
     "pytz",
-    "redis",
+    "redis>=4.5",
     "setuptools>=77",
     "wheel",
 ]
@@ -22,7 +22,7 @@ license-files = ["LICENSE*"]
 requires-python = ">=3.10"
 dependencies = [
     "Django>=5.0",
-    "redis",
+    "redis>=4.5",
     "pandas",
     "pytz",
     "jsonschema>=4",

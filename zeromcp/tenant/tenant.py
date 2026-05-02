@@ -1,5 +1,6 @@
 from contextvars import ContextVar
 import json
+import logging
 import os
 from hashlib import sha256
 
@@ -11,6 +12,8 @@ from django.db.models import Q
 from ..exception import HTTPException
 from ..redis_config import KEY_PREFIX, get_redis
 from .registry import TenantConnectionRegistry
+
+logger = logging.getLogger(__name__)
 
 # Multi-tenant configuration is optional. Projects that don't use it
 # can omit any (or all) of these names from ``settings`` — defaults
@@ -51,9 +54,9 @@ try:
 except ImportError:
     HASH_LENGTH = 8
 
-from ..settings_helper import get_setting
+from ..settings_helper import get_api_session_ttl, get_setting
 
-API_SESSION_TTL = get_setting('API_SESSION_TTL', default=300)
+API_SESSION_TTL = get_api_session_ttl()
 MCP_API_KEY_RESOLVER = get_setting('MCP_API_KEY_RESOLVER')
 
 
@@ -200,6 +203,47 @@ async def aset_tenant(id):
     return alias
 
 
+def clear_tenant():
+    """Reset tenant context to the framework default. Used when a
+    request transitions from an authenticated tenant-bound state to
+    anonymous or to a session without account, so subsequent ORM calls
+    in the same request don't keep the previous tenant's DB alias.
+    """
+    db_state.set('default')
+
+
+async def apply_session_to_request(request, session):
+    """Mirror the cookie-auth shape onto ``request`` for any auth path.
+
+    Used by both ``AuthMiddleware`` and ``BaseResource._authenticate``
+    so api-key, cookie, and any future auth method produce identical
+    request attributes and identical tenant activation. Idempotent —
+    safe to call twice in the same request.
+
+    ``session=None`` resets the request to the anonymous shape and
+    clears the tenant context.
+    """
+    if session is None:
+        request.user = None
+        request.session = None
+        request.authenticated = False
+        request.account = None
+        request.account_id = None
+        clear_tenant()
+        return
+
+    request.user = session['user']
+    request.session = session
+    request.authenticated = bool(session.get('user'))
+    account = session.get('account')
+    request.account = account
+    request.account_id = account['id'] if account else None
+    if account:
+        await aset_tenant(account['id'])
+    else:
+        clear_tenant()
+
+
 def _build_session(user, account_id):
     """Shared session-dict builder. Accepts ``account_id=None`` for
     single-tenant projects so the same shape works in both modes."""
@@ -302,24 +346,80 @@ async def get_api_session(api_key):
     self-describing four-segment format). Custom resolvers receive
     the raw key and return either a session dict or ``None``.
 
-    The result is cached under ``api_session:<sha256(api_key)[:16]>`` for
-    ``API_SESSION_TTL`` seconds — valid keys hit the underlying
-    storage at most once per window.
+    The result is cached under ``api_session:<sha256(api_key)[:16]>`` with
+    a sliding ``API_SESSION_TTL``-second window — each hit uses ``GETEX``
+    to read and renew the TTL atomically, so an idle key expires at
+    ``API_SESSION_TTL`` after its last use. Requires Redis >= 6.2.
     """
     redis = get_redis()
     key_hash = sha256(api_key.encode('utf-8')).hexdigest()[:16]
     session_key = f'{KEY_PREFIX}api_session:{key_hash}'
-    cached = await redis.get(session_key)
+    cached = await redis.getex(session_key, ex=API_SESSION_TTL)
     if cached:
-        return json.loads(cached)
+        session = json.loads(cached)
+        # Revalidate on read — a cached entry primed by older code or a
+        # since-tightened contract must not bypass the current rules.
+        if _validate_session_shape(session, resolver=None):
+            return session
+        await redis.delete(session_key)
 
     resolver = _load_resolver()
     session = await resolver(api_key)
-    if not session:
+    if session is None:
+        return None
+    if not _validate_session_shape(session, resolver):
         return None
 
     await redis.setex(session_key, API_SESSION_TTL, json.dumps(session))
     return session
+
+
+def _validate_session_shape(session, resolver):
+    """Strict shape check for resolver output (and cached entries).
+
+    Required: ``session`` is a dict with a ``user`` dict.
+    Multi-tenant (``account_model`` configured): ``account`` must be a
+    dict with an ``id``; if a top-level ``account_id`` is also present,
+    it must equal ``account['id']`` (no divergent values).
+    Single-tenant: ``account``/``account_id`` MUST NOT be present —
+    tenant data in a non-multi-tenant project signals a contract bug.
+
+    ``resolver=None`` means we are validating a cached entry (origin
+    unknown) — the message names ``cached entry`` instead.
+    """
+    source = (
+        getattr(resolver, '__qualname__', repr(resolver))
+        if resolver is not None else 'cached api-key entry'
+    )
+    if not isinstance(session, dict):
+        logger.warning('%s is not a dict', source)
+        return False
+    user = session.get('user')
+    if not isinstance(user, dict):
+        logger.warning('%s has no dict user', source)
+        return False
+    if account_model is not None:
+        account = session.get('account')
+        if not isinstance(account, dict) or 'id' not in account:
+            logger.warning(
+                "%s has no dict account['id'] (multi-tenant)", source,
+            )
+            return False
+        top_id = session.get('account_id')
+        if top_id is not None and str(top_id) != str(account['id']):
+            logger.warning(
+                "%s has divergent account_id (%r) and account['id'] (%r)",
+                source, top_id, account['id'],
+            )
+            return False
+    else:
+        if 'account' in session or 'account_id' in session:
+            logger.warning(
+                '%s carries account data in single-tenant project — '
+                'rejecting', source,
+            )
+            return False
+    return True
 
 
 def set_tenant(id):

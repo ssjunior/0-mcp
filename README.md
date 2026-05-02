@@ -65,7 +65,8 @@ REST is mostly a solved problem now. The new pain is MCP — most teams are rebu
 - **Multi-tenant DB routing.** One call switches the connection for the request.
 - **Pydantic when you want it.** Otherwise falls back to Django field introspection.
 - **OpenAPI 3.0.3 + Scalar UI.** Generated from the same resources.
-- **Ownership scoping.** One attribute (`owner_field = 'owner_id'`) is the cheapest IDOR defense I know.
+- **Ownership scoping.** One attribute (`owner_field = 'owner_id'`) restricts every CRUD operation (GET, LIST, PATCH, DELETE) to rows owned by the authenticated user — the cheapest IDOR defense I know. POST also forces `owner_id` to the caller; opt-in `allow_owner_override = True` for admin paths.
+- **Sliding session TTLs.** Both cookie and API-key sessions auto-renew on use via Redis `GETEX`. Configure via `SESSION_TTL` (default 1800s) and `API_SESSION_TTL` (default 300s).
 
 Full docs: [link to docs site]
 
@@ -108,11 +109,22 @@ curl -X POST http://localhost:8000/api/mcp \
 
 I'd rather you bounce now than get stuck a month in.
 
-- **No Redis available.** Sessions, cache, rate limit and abuse blocking all rely on it. Non-negotiable.
+- **No Redis available.** Sessions, cache, rate limit and abuse blocking all rely on it. Redis 6.2+ (uses `GETEX` for sliding session TTLs). Non-negotiable.
 - **You need complex auth.** OAuth2 server, SAML, intricate permission matrices — DRF or a custom stack will fit better.
 - **Your endpoints are mostly RPC, not CRUD.** And you don't want them as MCP tools either.
 - **You don't want Django.** 0-mcp wraps the Django ORM. The `init` command generates a Django project. If that's a dealbreaker, this isn't your tool.
 - **You want a big plugin ecosystem.** It's small on purpose.
+
+---
+
+## Hardening before you ship
+
+Defaults are demo-friendly. Production deployments should:
+
+- **Cookie auth.** Set at least one of `ENFORCE_TOKEN = True` (HMAC anti-replay on state-changing requests) or `ALLOWED_ORIGINS = [...]` (Origin allowlist). Without either, the framework logs a startup warning — there is no built-in CSRF defense for `POST/PATCH/DELETE`.
+- **Per-resource ownership.** Set `owner_field = 'owner_id'` on resources where rows belong to a single user — restricts every CRUD operation to the row's owner. `POST` always forces `owner_id` to the caller (override with `allow_owner_override = True` for admin paths).
+- **Authenticated cache.** If you turn on `cache = True` for an authenticated resource, set `session_cache = True` or `cache_scope_fields = (...)` — otherwise responses can leak across users. The framework warns at runtime when it detects this combination.
+- **Tune session TTLs.** `SESSION_TTL` (cookies, default 1800s) and `API_SESSION_TTL` (api-key cache, default 300s) both slide on use. Pick numbers that match your security/UX trade-off.
 
 ---
 

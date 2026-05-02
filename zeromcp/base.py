@@ -39,11 +39,21 @@ from .schemas import is_pydantic_model, serialize_output, validate_input
 from .serializer import CustomJSONEncoder
 from .util import validate_session_key
 from .rate_limit import RateLimiter
-from .tenant.tenant import aset_tenant, get_api_session
+from .tenant.tenant import (
+    apply_session_to_request,
+    aset_tenant,
+    get_api_session,
+)
 from .redis_config import KEY_PREFIX, get_redis
-from .settings_helper import get_cookie_id, get_setting, get_token_max_drift_ms
+from .settings_helper import (
+    get_cookie_id,
+    get_session_ttl,
+    get_setting,
+    get_token_max_drift_ms,
+)
 
 COOKIE_ID = get_cookie_id()
+SESSION_TTL = get_session_ttl()
 TOKEN_MAX_DRIFT_MS = get_token_max_drift_ms()
 ALLOWED_ORIGINS = get_setting('ALLOWED_ORIGINS', default=[])
 ENFORCE_TOKEN = get_setting('ENFORCE_TOKEN', default=False)
@@ -72,6 +82,22 @@ RATE_LIMITS = get_setting('RATE_LIMITS', default={
 
 
 logger = logging.getLogger(__name__)
+_WARNED_UNSCOPED_AUTH_CACHE = set()
+
+
+if not ENFORCE_TOKEN and not ALLOWED_ORIGINS:
+    # Startup warning — cookie auth without anti-CSRF protection. The
+    # framework supports both ``ENFORCE_TOKEN=True`` (HMAC anti-replay
+    # bound to the session) and ``ALLOWED_ORIGINS`` (Origin allowlist);
+    # neither is configured here. State-changing requests can be
+    # triggered cross-site if the deployment doesn't add its own layer
+    # (SameSite=Strict cookies, gateway-level CSRF, etc.).
+    logger.warning(
+        'cookie auth active without ENFORCE_TOKEN or ALLOWED_ORIGINS — '
+        'no anti-CSRF protection at the framework level. Configure at '
+        'least one in the MCP settings dict, or harden the cookie at '
+        'the deployment layer.',
+    )
 
 
 class BaseResource(View):
@@ -182,11 +208,19 @@ class BaseResource(View):
     # Combines with ``?filter=<json>`` via AND when both are present.
     stored_filter_param = None
 
-    # When set (e.g. owner_field='owner_id'), DELETE/PATCH only operate on
-    # rows whose value of this field matches the authenticated user's id.
-    # Default None disables the check (consumer is responsible for
-    # ownership via queryset_filter or custom delete_obj).
+    # When set (e.g. owner_field='owner_id'), every CRUD operation
+    # (GET/LIST/PATCH/DELETE) is restricted to rows whose value of this
+    # field matches the authenticated user's id. Default None disables
+    # the check (consumer is responsible for ownership via
+    # queryset_filter or custom get_obj/get_objs/delete_obj).
     owner_field = None
+
+    # Default-deny owner spoofing on create: when the model has an
+    # ``owner`` field, the framework forces ``owner_id`` to the
+    # authenticated user and ignores any value sent by the client.
+    # Set to True only on resources where an admin/integrator path
+    # legitimately needs to create rows on behalf of another user.
+    allow_owner_override = False
     search_fields = None
     order_fields = None
     list_fields = None
@@ -288,24 +322,35 @@ class BaseResource(View):
         return None, None, None
 
     def get_allowed_domain(self, request):
+        """Origin allowlist enforcement (anti-CSRF for cookie auth).
+
+        Off when ``ALLOWED_ORIGINS`` is empty. Localhost passes
+        unconditionally (for development). For everything else, the
+        request's ``Origin`` header is matched against the allowlist
+        (suffix match); ``Referer`` is consulted as fallback for
+        same-origin GETs that omit ``Origin``. Mismatch → 403.
+        """
         if not ALLOWED_ORIGINS:
             return
 
-        allowed = False
         host = request.headers.get('Host') or ''
         if LOCAL_HOST.match(host):
-            allowed = True
-        else:
-            referer = request.headers.get('Referer')
-            if referer:
-                domain = urlparse(referer).netloc.split(':')[0]
-                for origin in ALLOWED_ORIGINS:
-                    if domain.endswith(origin):
-                        allowed = True
-                        break
+            return
 
-        if not allowed:
-            raise HTTPException(403, 'Not allowed')
+        # Prefer ``Origin`` (set by browsers on cross-site requests and
+        # not strippable by a malicious page). Fall back to ``Referer``
+        # for older clients / same-origin GETs that may omit Origin.
+        candidate = (
+            request.headers.get('Origin')
+            or request.headers.get('Referer')
+        )
+        if candidate:
+            domain = urlparse(candidate).netloc.split(':')[0]
+            for origin in ALLOWED_ORIGINS:
+                if domain.endswith(origin):
+                    return
+
+        raise HTTPException(403, 'Not allowed')
 
     async def block(self, identifier):
         logger.warning('Blocking %s', identifier)
@@ -341,26 +386,40 @@ class BaseResource(View):
             raise HTTPException(429, 'Slow down, too many requests. You will be blocked.')
 
     async def _authenticate(self, request):
-        """Resolve user/account from API key or session cookie. Returns the
-        loaded session dict (or None) and the validated session key string
-        (used by session_cache)."""
+        """Resolve user/account from API key or session cookie. Returns
+        the loaded session dict (or None) and the validated session key
+        string (used by ``session_cache``; only returned when a real
+        session was loaded — never for an unmatched cookie).
+
+        Both paths populate the same ``request.*`` shape via the shared
+        :func:`apply_session_to_request` helper, so downstream code sees
+        identical attributes regardless of auth method."""
         if request.headers.get('X-Api-Key'):
             session = await get_api_session(request.headers.get('X-Api-Key'))
             if session:
                 self._activate_session(session)
+                await apply_session_to_request(request, session)
             return session, None
 
         session_key = validate_session_key(request.COOKIES.get(COOKIE_ID))
         if not session_key:
             return None, None
 
+        existing = getattr(request, 'session', None)
+        if existing:
+            self._activate_session(existing)
+            return existing, session_key
+
         redis = get_redis()
-        raw = await redis.get(f'{KEY_PREFIX}sessions:{session_key}')
+        raw = await redis.getex(
+            f'{KEY_PREFIX}sessions:{session_key}', ex=SESSION_TTL,
+        )
         if not raw:
-            return None, session_key
+            return None, None
 
         session = json.loads(raw)
         self._activate_session(session)
+        await apply_session_to_request(request, session)
         return session, session_key
 
     def _activate_session(self, session):
@@ -479,6 +538,51 @@ class BaseResource(View):
         if getattr(self, 'account_id', None) is None:
             return None
         return f'a={self.account_id}'
+
+    def _warn_if_authenticated_cache_unscoped(self):
+        """Warn once per resource class when authenticated cache lacks
+        enough isolation for the current request context.
+
+        Account auto-folding already isolates multi-tenant traffic when
+        ``self.account_id`` is active, so that case should not nag app
+        code to redundantly declare ``cache_scope_fields=[('account',
+        'id')]``. We warn only when an authenticated cached request is
+        effectively shared across users for the current runtime context:
+
+        - no ``session_cache``
+        - no explicit ``cache_scope_fields``
+        - and either account auto-scope is disabled or no account is
+          active for the request (single-tenant / anonymous-account path)
+        """
+        if not (
+            self.cache
+            and self.authenticated
+            and self.cache_ttl
+            and not self.session_cache
+            and not self.cache_scope_fields
+        ):
+            return
+
+        if AUTO_SCOPE_CACHE_BY_ACCOUNT and getattr(self, 'account_id', None) is not None:
+            return
+
+        warning_key = (
+            self.__class__,
+            bool(AUTO_SCOPE_CACHE_BY_ACCOUNT),
+            getattr(self, 'account_id', None) is not None,
+        )
+        if warning_key in _WARNED_UNSCOPED_AUTH_CACHE:
+            return
+        _WARNED_UNSCOPED_AUTH_CACHE.add(warning_key)
+
+        logger.warning(
+            'Resource %s: cache=True on authenticated endpoint without '
+            'session_cache or cache_scope_fields, and no active account '
+            'auto-scope for this request. Cached response may leak '
+            'across users. Set session_cache=True or '
+            'cache_scope_fields=(...) to scope the cache key per-user.',
+            self.__class__.__name__,
+        )
 
     def _build_cache_key(self, request, session_key):
         key = f'{KEY_PREFIX}cache' if KEY_PREFIX else '0-mcp:cache'
@@ -655,6 +759,7 @@ class BaseResource(View):
             and (not is_custom_route or self.route_cache)
         )
         if self.cache:
+            self._warn_if_authenticated_cache_unscoped()
             cached = await self._serve_cache(request, session_key, is_custom_route)
             if cached is not None:
                 return cached
@@ -1048,6 +1153,10 @@ class BaseResource(View):
     async def get_objs(self, request):
         await self.get_filters(request)
 
+        ownership = self._ownership_filter()
+        if ownership:
+            self.queryset = self.queryset.filter(**ownership)
+
         if request.GET.get('count'):
             return await self.count()
 
@@ -1170,9 +1279,13 @@ class BaseResource(View):
         if prefetch_fields:
             self.queryset = self.queryset.prefetch_related(*prefetch_fields)
 
-        self.obj = await self.queryset.filter(pk=id).afirst()
+        self.obj = await self.queryset.filter(
+            pk=id, **self._ownership_filter(),
+        ).afirst()
 
         if not self.obj:
+            # Same 404 whether the row doesn't exist or belongs to
+            # another owner — never leak existence cross-owner.
             raise HTTPException(404, 'Object does not exist')
 
         result = {}
@@ -1297,8 +1410,12 @@ class BaseResource(View):
             raise HTTPException(500, 'Update fields not defined')
 
         try:
-            self.obj = await self.queryset.aget(pk=id)
+            self.obj = await self.queryset.aget(
+                pk=id, **self._ownership_filter(),
+            )
         except Exception:
+            # Same 404 whether the row doesn't exist or belongs to
+            # another owner — never leak existence cross-owner.
             raise HTTPException(404, 'Item not found')
 
         to_update = {}
@@ -1340,7 +1457,9 @@ class BaseResource(View):
                 setattr(self.obj, key, value)
 
         if to_update:
-            await self.model.objects.filter(pk=id).aupdate(**to_update)
+            await self.model.objects.filter(
+                pk=id, **self._ownership_filter(),
+            ).aupdate(**to_update)
 
         return await self.get_obj(id)
 
@@ -1385,7 +1504,10 @@ class BaseResource(View):
             if 'updated_by' in self.all_fields:
                 body['updated_by_id'] = user['id']
             if 'owner' in self.all_fields:
-                body['owner_id'] = body.get('owner_id', user['id'])
+                if self.allow_owner_override:
+                    body['owner_id'] = body.get('owner_id', user['id'])
+                else:
+                    body['owner_id'] = user['id']
 
         blank_errors = []
         null_errors = []
