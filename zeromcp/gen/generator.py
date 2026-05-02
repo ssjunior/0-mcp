@@ -38,6 +38,7 @@ prevent agents from seeing credentials by accident.
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from importlib.resources import files
 from pathlib import Path
@@ -259,7 +260,11 @@ def generate(
             env, '.env.example.j2', output_dir / '.env',
             config=config, creds=creds,
         )
-    written += _render(env, 'README.md.j2', output_dir / 'README.md', config=config)
+    sample = _pick_sample_resource(grouped)
+    written += _render(
+        env, 'README.md.j2', output_dir / 'README.md',
+        config=config, sample=sample,
+    )
     written += _render(env, '.gitignore.j2', output_dir / '.gitignore', config=config)
     run_sh = output_dir / 'run.sh'
     written += _render(env, 'run.sh.j2', run_sh, config=config)
@@ -316,6 +321,20 @@ def generate(
         )
 
     return written
+
+
+def _pick_sample_resource(grouped):
+    """Return ``{rest_path, mcp_tool}`` for the first module/member pair
+    so the generated README can show copy-pasteable curl examples that
+    actually hit a real route. ``None`` when there's nothing to expose."""
+    for module_name in sorted(grouped):
+        members = grouped[module_name]
+        if not members:
+            continue
+        class_name, tcfg, _ = members[0]
+        slug = re.sub(r'(?<!^)(?=[A-Z])', '_', class_name).lower()
+        return {'rest_path': tcfg.db_table, 'mcp_tool': f'list_{slug}'}
+    return None
 
 
 def _render(env, template_name: str, target: Path, **ctx) -> list[Path]:

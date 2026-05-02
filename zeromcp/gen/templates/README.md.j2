@@ -30,6 +30,37 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 - `/mcp/tools.json` — same registry as JSON.
 - `/mcp` — JSON-RPC 2.0 endpoint (POST). Agents call tools through here.
 
+## Try it
+
+Start the dev server:
+
+```bash
+python manage.py runserver
+```
+
+{% if sample %}
+REST — list rows from `{{ sample.rest_path }}`:
+
+```bash
+curl -s http://localhost:8000/{{ sample.rest_path }} | jq
+```
+
+MCP — call the matching tool over JSON-RPC:
+
+```bash
+curl -s -X POST http://localhost:8000/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"{{ sample.mcp_tool }}","arguments":{}}}' | jq
+```
+{% else %}
+Open `http://localhost:8000/` to see the generated endpoints, then hit
+any of them with `curl`.
+{% endif %}
+
+No `X-Api-Key` needed yet — the generated project ships with
+`DEFAULT_AUTHENTICATED = False`. Turn auth on before deploying (see
+the production checklist below).
+
 ## Project layout
 
 ```
@@ -146,6 +177,16 @@ charge of the schema. To switch to Django-managed:
 1. Re-run `0-mcp init` with `--django-managed --writable`, **or**
 2. Delete `Meta.managed = False` lines you want Django to own and run
    `python manage.py makemigrations && python manage.py migrate --fake-initial` once.
+{% endif %}
+
+{% if config.project.read_only %}
+## Read-only mode
+
+This project was generated with `--read-only` (the default). The
+generated `settings.py` carries `MCP = {'READ_ONLY': True, ...}`, which
+makes every non-`GET` request return `405` across all resources — REST
+and MCP alike. To allow writes, drop the key (or set it to `False`)
+and the per-resource `allowed_methods` defaults take over.
 {% endif %}
 
 ## Auto-applied opinions
