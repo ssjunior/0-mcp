@@ -1,3 +1,9 @@
+# Local helper scripts and notes — not part of the published package.
+quickstart.sh
+walkthrough.sh
+build.sh
+test.md
+
 # macOS
 .DS_Store
 

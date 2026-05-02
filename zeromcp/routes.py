@@ -100,6 +100,12 @@ def get_routes(endpoints, **kwargs):
         from .mcp.resource import mcp_view
         from .mcp.tools import list_tools_public
 
+        # Forward attrs to ``mcp_view`` so callers can override
+        # ``MCPResource`` defaults (e.g. ``authenticated=False`` for
+        # demo deploys) without bypassing ``get_routes`` and re-wiring
+        # the route by hand.
+        mcp_kwargs = kwargs.get('mcp_kwargs') or {}
+
         async def mcp_tools_json(request, *args, **kwargs):
             if not docs_public and not await _has_valid_session(request):
                 return JsonResponse(
@@ -121,7 +127,7 @@ def get_routes(endpoints, **kwargs):
             return HttpResponse(_render_mcp_tools_html(tools))
 
         routes += [
-            path('mcp', mcp_view(endpoints)),
+            path('mcp', mcp_view(endpoints, **mcp_kwargs)),
             path('mcp/tools.json', mcp_tools_json),
             path('mcp/tools', mcp_tools_html),
         ]

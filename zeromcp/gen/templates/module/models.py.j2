@@ -34,21 +34,44 @@ class {{ class_name }}(models.Model):
 {% set fk_ref = fk_lookup.get(fk_table) %}
 {% set field_name = safe[:-3] if safe.endswith('_id') else safe %}
 {% set field_name = 'field_' + field_name if field_name in ('class', 'type', 'self', 'cls', 'def', 'from', 'in', 'is', 'global') else field_name %}
+{# Shared primary key: column is both PK and FK (typical 1:1 inheritance,
+   profile-extends-user, etc.). Without ``primary_key=True`` Django would
+   inject an implicit ``id = BigAutoField`` and the model would no longer
+   reflect the real table. Composite PKs use ``CompositePrimaryKey``
+   declared at the top of the class — individual columns must NOT carry
+   ``primary_key=True`` in that case. #}
+{% set is_pk = col.primary_key and pk_cols|length <= 1 %}
 {% if fk_table == t.db_table %}
-    {{ field_name }} = models.ForeignKey('self', on_delete=models.DO_NOTHING, db_column='{{ col.db_column or col.name }}'{% if col.null %}, null=True, blank=True{% endif %}, related_name='+')
+    {{ field_name }} = models.ForeignKey('self', on_delete=models.DO_NOTHING{% if is_pk %}, primary_key=True{% endif %}, db_column='{{ col.db_column or col.name }}'{% if col.null %}, null=True, blank=True{% endif %}, related_name='+')
 {% else %}
-    {{ field_name }} = models.ForeignKey({% if fk_ref %}'{{ fk_ref }}'{% else %}'{{ fk_table | replace("_", "") | title | replace(" ", "") }}'{% endif %}, on_delete=models.DO_NOTHING, db_column='{{ col.db_column or col.name }}'{% if col.null %}, null=True, blank=True{% endif %}, related_name='+')
+    {{ field_name }} = models.ForeignKey({% if fk_ref %}'{{ fk_ref }}'{% else %}'{{ fk_table | replace("_", "") | title | replace(" ", "") }}'{% endif %}, on_delete=models.DO_NOTHING{% if is_pk %}, primary_key=True{% endif %}, db_column='{{ col.db_column or col.name }}'{% if col.null %}, null=True, blank=True{% endif %}, related_name='+')
 {% endif %}
 {% elif col.py_type == 'CharField' %}
-    {{ safe }} = models.CharField(max_length={{ col.max_length or 255 }}{% if col.null %}, null=True, blank=True{% endif %}{% if col.choices %}, choices={{ col.choices }}{% endif %}{% if has_alias %}, db_column='{{ col.db_column or col.name }}'{% endif %})
+{% set is_pk = col.primary_key and pk_cols|length <= 1 %}
+    {{ safe }} = models.CharField(max_length={{ col.max_length or 255 }}{% if is_pk %}, primary_key=True{% endif %}{% if col.null %}, null=True, blank=True{% endif %}{% if col.choices %}, choices={{ col.choices }}{% endif %}{% if has_alias %}, db_column='{{ col.db_column or col.name }}'{% endif %})
 {% elif col.py_type == 'DecimalField' %}
-    {{ safe }} = models.DecimalField(max_digits={{ col.decimal_digits[0] if col.decimal_digits else 12 }}, decimal_places={{ col.decimal_digits[1] if col.decimal_digits else 2 }}{% if col.null %}, null=True, blank=True{% endif %}{% if has_alias %}, db_column='{{ col.db_column or col.name }}'{% endif %})
+{% set is_pk = col.primary_key and pk_cols|length <= 1 %}
+    {{ safe }} = models.DecimalField(max_digits={{ col.decimal_digits[0] if col.decimal_digits else 12 }}, decimal_places={{ col.decimal_digits[1] if col.decimal_digits else 2 }}{% if is_pk %}, primary_key=True{% endif %}{% if col.null %}, null=True, blank=True{% endif %}{% if has_alias %}, db_column='{{ col.db_column or col.name }}'{% endif %})
+{% elif col.py_type == 'BigAutoField' and pk_cols|length <= 1 and safe == 'id' and not has_alias and (col.db_column in (None, '', 'id')) %}
+{# Skip: Django auto-creates ``id = BigAutoField(primary_key=True)``
+   when the model has no PK declared, driven by ``DEFAULT_AUTO_FIELD``
+   (BigAutoField since Django 3.2). Generating it explicitly is
+   redundant noise. We only skip when (a) name is ``id``, (b) no
+   Python-side alias, (c) db_column matches ``id``, and (d) it's
+   BigAutoField specifically — for AutoField/SmallAutoField we keep
+   the explicit declaration so Django's auto field doesn't override
+   the requested width. #}
 {% elif col.py_type in ('AutoField', 'BigAutoField', 'SmallAutoField') and pk_cols|length <= 1 %}
     {{ safe }} = models.{{ col.py_type }}(primary_key=True{% if has_alias %}, db_column='{{ col.db_column or col.name }}'{% endif %})
 {% elif col.py_type in ('AutoField', 'BigAutoField', 'SmallAutoField') %}
     {{ safe }} = models.BigIntegerField({% if has_alias %}db_column='{{ col.db_column or col.name }}'{% endif %})
 {% else %}
-    {{ safe }} = models.{{ col.py_type }}({% if col.null %}null=True, blank=True{% endif %}{% if col.choices %}{% if col.null %}, {% endif %}choices={{ col.choices }}{% endif %}{% if has_alias %}{% if col.null or col.choices %}, {% endif %}db_column='{{ col.db_column or col.name }}'{% endif %})
+{# Single-column PK that isn't an AutoField (e.g. a legacy ``INT
+   PRIMARY KEY`` without auto-increment, or a ``CHAR``/``UUID`` PK).
+   Django requires ``primary_key=True`` on any field named ``id`` that
+   isn't auto-generated, and also when the column is the table PK. #}
+{% set is_pk = col.primary_key and pk_cols|length <= 1 %}
+    {{ safe }} = models.{{ col.py_type }}({% if is_pk %}primary_key=True{% endif %}{% if col.null %}{% if is_pk %}, {% endif %}null=True, blank=True{% endif %}{% if col.choices %}{% if is_pk or col.null %}, {% endif %}choices={{ col.choices }}{% endif %}{% if has_alias %}{% if is_pk or col.null or col.choices %}, {% endif %}db_column='{{ col.db_column or col.name }}'{% endif %})
 {% endif %}
 {% endfor %}
 

@@ -1,6 +1,16 @@
 """ASGI entry point for the {{ config.project.name }} project."""
 import os
 
+{% if config.project.backend == 'mysql' %}
+# Same ``mysqlclient`` → ``PyMySQL`` fallback as ``manage.py``, so the
+# ASGI app boots whichever driver is installed.
+try:
+    import MySQLdb  # noqa: F401
+except ImportError:
+    import pymysql
+    pymysql.install_as_MySQLdb()
+{% endif %}
+
 from django.core.asgi import get_asgi_application
 
 

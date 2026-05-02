@@ -7,5 +7,11 @@ django-zeromcp
 {% if config.project.backend == 'postgres' %}
 psycopg2-binary>=2.9
 {% elif config.project.backend == 'mysql' %}
+# Native C-based MySQL driver — fastest, what Django officially
+# recommends. Needs ``mysql-client`` + ``pkg-config`` on the system
+# (``brew install mysql-client pkg-config`` on macOS). If the install
+# fails to compile, comment this out and uncomment ``PyMySQL`` below;
+# ``manage.py`` / ``asgi.py`` auto-detect either driver.
 mysqlclient>=2.2
+# PyMySQL>=1.1
 {% endif %}

@@ -43,10 +43,14 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 │   └── urls.py
 └── modules/
     └── <prefix>/
-        ├── apps.py
         ├── models.py     # one Django model per table
         └── resources.py  # one BaseResource per model
 ```
+
+No per-module `apps.py` — Django auto-creates `AppConfig` from the
+dotted path in `INSTALLED_APPS`, picking up `DEFAULT_AUTO_FIELD` from
+`settings.py`. Add one yourself only if you need to override defaults
+(custom `verbose_name`, signal wiring, etc.).
 
 Tables sharing a name prefix land in the same module —
 `contract`, `contract_item`, `contract_history` all live in
@@ -106,11 +110,25 @@ internet-facing, work through this list:
    same X-Api-Key/session as every REST resource.
 3. **`settings/settings.py`** — flip `'DEFAULT_AUTHENTICATED': True`
    in the `MCP` dict so every REST resource starts requiring auth.
-   Set `ENFORCE_TOKEN`, `TRUSTED_PROXIES`, `ALLOWED_ORIGINS` if you
-   serve a browser frontend on a different domain.
-4. **`TENANT_USER_API_MODEL`** — point at the model that stores your
-   API keys (column expected: `api_key`). Without it, MCP/REST traffic
-   has no way to authenticate.
+   Set at least one of `ENFORCE_TOKEN: True` (HMAC anti-replay) or
+   `ALLOWED_ORIGINS: [...]` (browser Origin allowlist) — without
+   either, the framework logs a startup warning and your cookie auth
+   has no built-in CSRF defense. Tune sliding TTLs via `SESSION_TTL`
+   (cookie, default 1800s) and `API_SESSION_TTL` (api-key cache,
+   default 300s).
+4. **`TENANT_USER_API_MODEL`** — uncomment the line in `settings.py`
+   and point at the model that stores your API keys (column expected:
+   `api_key`). Without it, the default api-key resolver finds nothing
+   and `X-Api-Key` traffic falls through to anonymous.
+5. **Per-resource ownership** — set `owner_field = 'owner_id'` on
+   resources whose rows belong to a single user. Restricts every CRUD
+   operation (GET, LIST, PATCH, DELETE) to the owner. POST always
+   forces `owner_id` to the caller (override with
+   `allow_owner_override = True` for admin paths).
+6. **Authenticated cache** — if you turn on `cache = True` for an
+   authenticated resource, also set `session_cache = True` or
+   `cache_scope_fields = (...)`. The framework warns at runtime when
+   it detects unscoped authenticated cache.
 
 ## Schema ownership
 {% if config.project.django_managed %}

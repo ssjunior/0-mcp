@@ -302,11 +302,9 @@ def generate(
         mod_dir.mkdir(exist_ok=True)
         (mod_dir / '__init__.py').write_text('')
         written.append(mod_dir / '__init__.py')
-        written += _render(
-            env, 'module/apps.py.j2', mod_dir / 'apps.py',
-            config=config, module_name=module_name,
-            class_name=_pascal(module_name),
-        )
+        # No ``apps.py`` per module — Django auto-creates the
+        # ``AppConfig`` from the dotted path in ``INSTALLED_APPS``,
+        # picking up ``DEFAULT_AUTO_FIELD`` from settings.
         written += _render(
             env, 'module/models.py.j2', mod_dir / 'models.py',
             config=config, module_name=module_name, members=members,
@@ -327,5 +325,3 @@ def _render(env, template_name: str, target: Path, **ctx) -> list[Path]:
     return [target]
 
 
-def _pascal(name: str) -> str:
-    return ''.join(part.capitalize() for part in name.split('_') if part)

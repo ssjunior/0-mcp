@@ -3,6 +3,26 @@
 import os
 import sys
 
+{% if config.project.backend == 'mysql' %}
+# MySQL: prefer the C-based ``mysqlclient`` driver. Fall back to
+# ``PyMySQL`` (pure-Python, no system deps) when ``mysqlclient`` isn't
+# available — the shim makes Django's ``django.db.backends.mysql``
+# import succeed transparently. Lets the project boot from a fresh
+# ``uv pip install -e ...[gen-mysql]`` without manual hacks.
+try:
+    import MySQLdb  # noqa: F401
+except ImportError:
+    try:
+        import pymysql
+        pymysql.install_as_MySQLdb()
+    except ImportError:
+        sys.stderr.write(
+            'No MySQL driver available. Install one of:\n'
+            '  uv pip install mysqlclient   # native, faster\n'
+            '  uv pip install pymysql       # pure Python, no system deps\n'
+        )
+        sys.exit(1)
+{% endif %}
 
 def main() -> None:
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings.settings')

@@ -85,19 +85,25 @@ logger = logging.getLogger(__name__)
 _WARNED_UNSCOPED_AUTH_CACHE = set()
 
 
-if not ENFORCE_TOKEN and not ALLOWED_ORIGINS:
-    # Startup warning — cookie auth without anti-CSRF protection. The
-    # framework supports both ``ENFORCE_TOKEN=True`` (HMAC anti-replay
-    # bound to the session) and ``ALLOWED_ORIGINS`` (Origin allowlist);
-    # neither is configured here. State-changing requests can be
-    # triggered cross-site if the deployment doesn't add its own layer
-    # (SameSite=Strict cookies, gateway-level CSRF, etc.).
+def _warn_csrf_unprotected_at_startup():
+    """Emit the anti-CSRF startup warning when auth is enabled
+    globally but neither ``ENFORCE_TOKEN`` nor ``ALLOWED_ORIGINS`` is
+    configured. Demo projects (``DEFAULT_AUTHENTICATED=False``) skip
+    the warning — there's no cookie auth in play to harden.
+    """
+    if not DEFAULT_AUTHENTICATED:
+        return
+    if ENFORCE_TOKEN or ALLOWED_ORIGINS:
+        return
     logger.warning(
-        'cookie auth active without ENFORCE_TOKEN or ALLOWED_ORIGINS — '
-        'no anti-CSRF protection at the framework level. Configure at '
-        'least one in the MCP settings dict, or harden the cookie at '
-        'the deployment layer.',
+        'authenticated mode is on but neither ENFORCE_TOKEN nor '
+        'ALLOWED_ORIGINS is configured — no anti-CSRF defense at the '
+        'framework level. Set at least one in the MCP settings dict, '
+        'or harden cookies at the deployment layer.',
     )
+
+
+_warn_csrf_unprotected_at_startup()
 
 
 class BaseResource(View):

@@ -141,3 +141,51 @@ def test_anonymous_cache_does_not_warn_at_class_declaration(caplog):
         'PublicCached' in record.message
         for record in caplog.records
     )
+
+
+# ── #5 — startup CSRF warning gated on DEFAULT_AUTHENTICATED ──────────
+
+
+def _csrf_warning_records(caplog):
+    return [
+        r for r in caplog.records
+        if 'authenticated mode is on' in r.getMessage()
+    ]
+
+
+def test_csrf_warning_silent_when_auth_off(caplog, monkeypatch):
+    """Demo project (``DEFAULT_AUTHENTICATED=False``) must NOT warn —
+    there's no cookie auth active, hardening would be theatre."""
+    monkeypatch.setattr(base_mod, 'DEFAULT_AUTHENTICATED', False)
+    monkeypatch.setattr(base_mod, 'ENFORCE_TOKEN', False)
+    monkeypatch.setattr(base_mod, 'ALLOWED_ORIGINS', [])
+    with caplog.at_level(logging.WARNING, logger='zeromcp.base'):
+        base_mod._warn_csrf_unprotected_at_startup()
+    assert not _csrf_warning_records(caplog)
+
+
+def test_csrf_warning_silent_when_enforce_token_set(caplog, monkeypatch):
+    monkeypatch.setattr(base_mod, 'DEFAULT_AUTHENTICATED', True)
+    monkeypatch.setattr(base_mod, 'ENFORCE_TOKEN', True)
+    monkeypatch.setattr(base_mod, 'ALLOWED_ORIGINS', [])
+    with caplog.at_level(logging.WARNING, logger='zeromcp.base'):
+        base_mod._warn_csrf_unprotected_at_startup()
+    assert not _csrf_warning_records(caplog)
+
+
+def test_csrf_warning_silent_when_allowed_origins_set(caplog, monkeypatch):
+    monkeypatch.setattr(base_mod, 'DEFAULT_AUTHENTICATED', True)
+    monkeypatch.setattr(base_mod, 'ENFORCE_TOKEN', False)
+    monkeypatch.setattr(base_mod, 'ALLOWED_ORIGINS', ['app.example.com'])
+    with caplog.at_level(logging.WARNING, logger='zeromcp.base'):
+        base_mod._warn_csrf_unprotected_at_startup()
+    assert not _csrf_warning_records(caplog)
+
+
+def test_csrf_warning_fires_when_auth_on_and_unhardened(caplog, monkeypatch):
+    monkeypatch.setattr(base_mod, 'DEFAULT_AUTHENTICATED', True)
+    monkeypatch.setattr(base_mod, 'ENFORCE_TOKEN', False)
+    monkeypatch.setattr(base_mod, 'ALLOWED_ORIGINS', [])
+    with caplog.at_level(logging.WARNING, logger='zeromcp.base'):
+        base_mod._warn_csrf_unprotected_at_startup()
+    assert _csrf_warning_records(caplog)

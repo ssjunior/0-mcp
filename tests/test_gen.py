@@ -266,12 +266,13 @@ def test_generate_writes_complete_project(tmp_path):
     assert 'settings/settings.py' in paths
     assert 'router/urls.py' in paths
     assert 'router/endpoints.py' in paths
-    # One module per prefix.
+    # One module per prefix. No ``apps.py`` — Django auto-creates the
+    # AppConfig from the dotted path in INSTALLED_APPS.
     assert 'modules/client/models.py' in paths
     assert 'modules/client/resources.py' in paths
-    assert 'modules/client/apps.py' in paths
     assert 'modules/user/models.py' in paths
     assert 'modules/user/resources.py' in paths
+    assert not any(p.endswith('/apps.py') for p in paths)
 
 
 def test_generate_emits_self_fk_for_intra_table_relations(tmp_path):
@@ -323,6 +324,222 @@ def test_generated_project_is_demo_friendly_by_default(tmp_path):
     cfg = build_starter_config(schema)
     generate(cfg, tmp_path, schema=schema)
     urls_py = (tmp_path / 'router' / 'urls.py').read_text()
-    assert 'authenticated=False' in urls_py
+    # MCP route forwards ``authenticated=False`` via mcp_kwargs so the
+    # demo project exposes /mcp without auth.
+    assert "'authenticated': False" in urls_py
+    assert 'mcp=True' in urls_py
+    assert 'docs_public=True' in urls_py
     env_example = (tmp_path / '.env.example').read_text()
     assert 'DEBUG=true' in env_example
+
+
+def test_generate_skips_redundant_bigautofield_id(tmp_path):
+    """``id = BigAutoField(primary_key=True)`` is redundant because
+    Django's ``DEFAULT_AUTO_FIELD`` (BigAutoField since 3.2) auto-adds
+    it. The generator omits the line to keep models clean."""
+    pytest.importorskip('jinja2')
+    schema = {
+        'backend': 'mysql', 'database': 'demo',
+        'tables': [
+            {
+                'name': 'File', 'db_table': 'file',
+                'columns': [
+                    {'name': 'id', 'db_type': 'bigint', 'py_type': 'BigAutoField',
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': True, 'max_length': None,
+                     'decimal_digits': None, 'default': None, 'fk_target': None,
+                     'choices': None, 'comment': None, 'db_column': 'id'},
+                    {'name': 'path', 'db_type': 'varchar', 'py_type': 'CharField',
+                     'null': False, 'primary_key': False, 'unique': False,
+                     'auto_increment': False, 'max_length': 255,
+                     'decimal_digits': None, 'default': None, 'fk_target': None,
+                     'choices': None, 'comment': None, 'db_column': 'path'},
+                ],
+                'indexes': [], 'unique_together': [],
+                'comment': None, 'row_estimate': 0,
+            },
+        ],
+        'relationships': [],
+    }
+    cfg = build_starter_config(schema)
+    generate(cfg, tmp_path, schema=schema)
+    models_py = (tmp_path / 'modules' / 'file' / 'models.py').read_text()
+    assert 'BigAutoField' not in models_py
+    # Other columns still emitted.
+    assert 'path = models.CharField' in models_py
+
+
+def test_generate_keeps_smallautofield_and_autofield_explicit(tmp_path):
+    """Only BigAutoField named ``id`` matches the project default —
+    smaller auto fields must stay explicit so the requested width
+    isn't silently widened to BigAutoField by Django."""
+    pytest.importorskip('jinja2')
+    schema = {
+        'backend': 'mysql', 'database': 'demo',
+        'tables': [
+            {
+                'name': 'Tiny', 'db_table': 'tiny',
+                'columns': [
+                    {'name': 'id', 'db_type': 'int', 'py_type': 'AutoField',
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': True, 'max_length': None,
+                     'decimal_digits': None, 'default': None, 'fk_target': None,
+                     'choices': None, 'comment': None, 'db_column': 'id'},
+                ],
+                'indexes': [], 'unique_together': [],
+                'comment': None, 'row_estimate': 0,
+            },
+        ],
+        'relationships': [],
+    }
+    cfg = build_starter_config(schema)
+    generate(cfg, tmp_path, schema=schema)
+    models_py = (tmp_path / 'modules' / 'tiny' / 'models.py').read_text()
+    assert 'id = models.AutoField(primary_key=True)' in models_py
+
+
+def test_generate_emits_primary_key_for_shared_pk_fk(tmp_path):
+    """A column that is BOTH primary key and foreign key (the
+    shared-primary-key pattern, common in 1:1 ``profile`` extending
+    ``user``) must keep ``primary_key=True`` on the ForeignKey;
+    otherwise Django auto-creates an implicit ``id`` and the model
+    stops reflecting the real table."""
+    pytest.importorskip('jinja2')
+    schema = {
+        'backend': 'mysql', 'database': 'demo',
+        'tables': [
+            {
+                'name': 'User', 'db_table': 'user',
+                'columns': [
+                    {'name': 'id', 'db_type': 'bigint', 'py_type': 'BigAutoField',
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': True, 'max_length': None,
+                     'decimal_digits': None, 'default': None, 'fk_target': None,
+                     'choices': None, 'comment': None, 'db_column': 'id'},
+                ],
+                'indexes': [], 'unique_together': [],
+                'comment': None, 'row_estimate': 0,
+            },
+            {
+                'name': 'Profile', 'db_table': 'profile',
+                'columns': [
+                    {'name': 'id', 'db_type': 'bigint', 'py_type': 'BigIntegerField',
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': False, 'max_length': None,
+                     'decimal_digits': None, 'default': None,
+                     'fk_target': 'public.user.id',
+                     'choices': None, 'comment': None, 'db_column': 'id'},
+                    {'name': 'bio', 'db_type': 'text', 'py_type': 'TextField',
+                     'null': True, 'primary_key': False, 'unique': False,
+                     'auto_increment': False, 'max_length': None,
+                     'decimal_digits': None, 'default': None, 'fk_target': None,
+                     'choices': None, 'comment': None, 'db_column': 'bio'},
+                ],
+                'indexes': [], 'unique_together': [],
+                'comment': None, 'row_estimate': 0,
+            },
+        ],
+        'relationships': [],
+    }
+    cfg = build_starter_config(schema)
+    generate(cfg, tmp_path, schema=schema)
+    models_py = (tmp_path / 'modules' / 'profile' / 'models.py').read_text()
+    # The FK column must declare itself the primary key on the model.
+    assert 'models.ForeignKey' in models_py
+    assert 'primary_key=True' in models_py
+    # And keep the db_column so writes hit the right column.
+    assert "db_column='id'" in models_py
+
+
+def test_generate_skips_primary_key_on_composite_pk_fk(tmp_path):
+    """When the table has a composite primary key that includes a FK
+    column, the individual FK column must NOT carry ``primary_key=True``
+    — the ``CompositePrimaryKey`` declaration at the top of the class
+    is what marks the PK. ``primary_key=True`` on individual columns
+    would conflict with the composite declaration."""
+    pytest.importorskip('jinja2')
+    schema = {
+        'backend': 'mysql', 'database': 'demo',
+        'tables': [
+            {
+                'name': 'Tag', 'db_table': 'tag',
+                'columns': [
+                    {'name': 'id', 'db_type': 'bigint', 'py_type': 'BigAutoField',
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': True, 'max_length': None,
+                     'decimal_digits': None, 'default': None, 'fk_target': None,
+                     'choices': None, 'comment': None, 'db_column': 'id'},
+                ],
+                'indexes': [], 'unique_together': [],
+                'comment': None, 'row_estimate': 0,
+            },
+            {
+                'name': 'PostTag', 'db_table': 'post_tag',
+                'columns': [
+                    {'name': 'post_id', 'db_type': 'bigint', 'py_type': 'BigIntegerField',
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': False, 'max_length': None,
+                     'decimal_digits': None, 'default': None,
+                     'fk_target': 'public.post.id',
+                     'choices': None, 'comment': None, 'db_column': 'post_id'},
+                    {'name': 'tag_id', 'db_type': 'bigint', 'py_type': 'BigIntegerField',
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': False, 'max_length': None,
+                     'decimal_digits': None, 'default': None,
+                     'fk_target': 'public.tag.id',
+                     'choices': None, 'comment': None, 'db_column': 'tag_id'},
+                ],
+                'indexes': [], 'unique_together': [],
+                'comment': None, 'row_estimate': 0,
+            },
+        ],
+        'relationships': [],
+    }
+    cfg = build_starter_config(schema)
+    generate(cfg, tmp_path, schema=schema)
+    models_py = (tmp_path / 'modules' / 'post' / 'models.py').read_text()
+    # CompositePrimaryKey at top of class.
+    assert 'CompositePrimaryKey' in models_py
+    # Individual FK columns must NOT carry primary_key=True.
+    fk_lines = [
+        line for line in models_py.splitlines()
+        if 'models.ForeignKey' in line
+    ]
+    assert fk_lines, 'expected ForeignKey declarations'
+    for line in fk_lines:
+        assert 'primary_key=True' not in line, (
+            f'composite PK column should not have primary_key=True: {line}'
+        )
+
+
+@pytest.mark.parametrize('py_type', ['IntegerField', 'BigIntegerField', 'CharField'])
+def test_generate_emits_primary_key_for_non_auto_pk(tmp_path, py_type):
+    """Legacy schemas with non-auto PKs (``id INT PRIMARY KEY``,
+    ``id BIGINT PRIMARY KEY`` without auto_increment, or a ``CHAR``
+    PK) must still get ``primary_key=True`` on the field — otherwise
+    Django's system check rejects with ``models.E004``."""
+    pytest.importorskip('jinja2')
+    schema = {
+        'backend': 'mysql', 'database': 'demo',
+        'tables': [
+            {
+                'name': 'File', 'db_table': 'file',
+                'columns': [
+                    {'name': 'id', 'db_type': 'int', 'py_type': py_type,
+                     'null': False, 'primary_key': True, 'unique': False,
+                     'auto_increment': False,
+                     'max_length': 64 if py_type == 'CharField' else None,
+                     'decimal_digits': None, 'default': None, 'fk_target': None,
+                     'choices': None, 'comment': None, 'db_column': 'id'},
+                ],
+                'indexes': [], 'unique_together': [],
+                'comment': None, 'row_estimate': 0,
+            },
+        ],
+        'relationships': [],
+    }
+    cfg = build_starter_config(schema)
+    generate(cfg, tmp_path, schema=schema)
+    models_py = (tmp_path / 'modules' / 'file' / 'models.py').read_text()
+    assert f'id = models.{py_type}(' in models_py
+    assert 'primary_key=True' in models_py
