@@ -55,3 +55,7 @@ def get_session_ttl():
 
 def get_api_session_ttl():
     return get_setting('API_SESSION_TTL', default=300)
+
+
+def get_read_only():
+    return get_setting('READ_ONLY', default=False)

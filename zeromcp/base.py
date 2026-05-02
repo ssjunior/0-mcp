@@ -47,6 +47,7 @@ from .tenant.tenant import (
 from .redis_config import KEY_PREFIX, get_redis
 from .settings_helper import (
     get_cookie_id,
+    get_read_only,
     get_session_ttl,
     get_setting,
     get_token_max_drift_ms,
@@ -748,6 +749,9 @@ class BaseResource(View):
 
         if func:
             self.allowed_methods = allowed_methods or self.allowed_methods
+
+        if get_read_only() and self.method != 'get':
+            raise HTTPException(405, f'{self.method.upper()} not allowed (READ_ONLY)')
 
         if self.method not in self.allowed_methods:
             raise HTTPException(405, f'{self.method.upper()} not allowed')

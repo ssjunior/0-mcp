@@ -67,6 +67,7 @@ REST is mostly a solved problem now. The new pain is MCP — most teams are rebu
 - **OpenAPI 3.0.3 + Scalar UI.** Generated from the same resources.
 - **Ownership scoping.** One attribute (`owner_field = 'owner_id'`) restricts every CRUD operation (GET, LIST, PATCH, DELETE) to rows owned by the authenticated user — the cheapest IDOR defense I know. POST also forces `owner_id` to the caller; opt-in `allow_owner_override = True` for admin paths.
 - **Sliding session TTLs.** Both cookie and API-key sessions auto-renew on use via Redis `GETEX`. Configure via `SESSION_TTL` (default 1800s) and `API_SESSION_TTL` (default 300s).
+- **Global read-only switch.** `MCP = {'READ_ONLY': True}` rejects every non-`GET` request with `405` across all resources — single setting, no per-resource edits. Default `False`. The generator emits this for you when you pick read-only at `0-mcp init`.
 
 Full docs: [link to docs site]
 
@@ -94,10 +95,10 @@ Add to `claude_desktop_config.json`:
 
 Restart Claude Desktop. The agent now has typed tools for every resource you exposed.
 
-For HTTP-based agents (Cursor, custom copilots, anything else that speaks JSON-RPC over POST), the same tools live at `POST /api/mcp` behind an `X-Api-Key`:
+For HTTP-based agents (Cursor, custom copilots, anything else that speaks JSON-RPC over POST), the same tools live at `POST /mcp` behind an `X-Api-Key`:
 
 ```bash
-curl -X POST http://localhost:8000/api/mcp \
+curl -X POST http://localhost:8000/mcp \
   -H 'Content-Type: application/json' \
   -H "X-Api-Key: $TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
