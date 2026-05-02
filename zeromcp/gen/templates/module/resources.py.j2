@@ -17,9 +17,6 @@ from .models import (
 {% for class_name, tcfg, _ in members %}
 class {{ class_name }}Resource(BaseResource):
     model = {{ class_name }}
-{% if config.project.read_only %}
-    allowed_methods = ['get']
-{% endif %}
 {% if tcfg.sensitive %}
     sensitive_fields = {{ tcfg.sensitive }}
 {% endif %}

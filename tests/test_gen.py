@@ -307,13 +307,25 @@ def test_generate_propagates_sensitive_fields(tmp_path):
     assert "sensitive_fields = ['password']" in user_resources
 
 
-def test_generate_read_only_emits_get_only_methods(tmp_path):
+def test_generate_read_only_emits_settings_gate(tmp_path):
     pytest.importorskip('jinja2')
     schema = _synthetic_schema()
     cfg = build_starter_config(schema, read_only=True)
     generate(cfg, tmp_path, schema=schema)
     client_resources = (tmp_path / 'modules' / 'client' / 'resources.py').read_text()
-    assert "allowed_methods = ['get']" in client_resources
+    # Per-resource ``allowed_methods`` no longer emitted — gate is global.
+    assert 'allowed_methods' not in client_resources
+    settings_py = (tmp_path / 'settings' / 'settings.py').read_text()
+    assert "'READ_ONLY': True" in settings_py
+
+
+def test_generate_writable_omits_read_only_setting(tmp_path):
+    pytest.importorskip('jinja2')
+    schema = _synthetic_schema()
+    cfg = build_starter_config(schema, read_only=False)
+    generate(cfg, tmp_path, schema=schema)
+    settings_py = (tmp_path / 'settings' / 'settings.py').read_text()
+    assert 'READ_ONLY' not in settings_py
 
 
 def test_generated_project_is_demo_friendly_by_default(tmp_path):

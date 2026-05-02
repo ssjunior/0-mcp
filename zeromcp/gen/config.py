@@ -60,11 +60,11 @@ class Project:
     name: str
     backend: str
     database: str
-    # When True (default), every generated resource ships with
-    # ``allowed_methods = ['get']`` — write verbs (POST/PATCH/DELETE)
-    # are kept off both the REST and MCP surface. Safer first-run
-    # default for projects pointed at an existing database; flip with
-    # ``--writable`` (or edit per-resource) when you want mutations.
+    # When True (default), the generated ``settings.py`` carries
+    # ``MCP = {'READ_ONLY': True}`` — a global gate that rejects every
+    # non-GET request with 405 across all resources (REST + MCP).
+    # Safer first-run default for projects pointed at an existing
+    # database; flip with ``--writable`` to drop the gate.
     read_only: bool = True
     # Reserved — currently unused. The generator now always emits a
     # demo-friendly project (DEBUG defaults true, public docs, open

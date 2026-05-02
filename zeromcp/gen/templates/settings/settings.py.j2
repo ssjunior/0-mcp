@@ -61,6 +61,10 @@ MCP = {
     # Flip to ``True`` and uncomment ``TENANT_USER_API_MODEL`` below
     # (or set ``authenticated = True`` per resource) before deploying.
     'DEFAULT_AUTHENTICATED': False,         # framework default: True
+{% if config.project.read_only %}
+    # Global read-only gate — every non-GET request returns 405.
+    'READ_ONLY': True,                      # framework default: False
+{% endif %}
     # 'COOKIE_ID': 'sessionid',             # name of the cookie that carries the session id
     # X-Token anti-replay window: max clock skew (in ms) the server
     # accepts between the client's signed timestamp and now. Lower =
