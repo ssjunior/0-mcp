@@ -3,6 +3,7 @@ import os
 import weakref
 
 import redis.asyncio as aioredis
+from redis.exceptions import ResponseError
 
 def _resolve_redis_env():
     """Read REDIS_SERVER / REDIS_DB lazily.
@@ -91,6 +92,43 @@ def get_redis():
             # returning a fresh client without caching.
             pass
     return client
+
+
+_REDIS_TOO_OLD_MSG = (
+    "0-mcp requires Redis 6.2 or newer — the framework uses GETEX for "
+    "sliding session TTLs. Detected an older Redis that returned "
+    "'unknown command GETEX'.\n"
+    "Upgrade options:\n"
+    "  • RHEL/Oracle Linux 8: `sudo dnf module reset redis -y && "
+    "sudo dnf module enable redis:6 -y && sudo dnf install -y redis`\n"
+    "  • Ubuntu/Debian:        `curl -fsSL https://packages.redis.io/gpg | "
+    "sudo gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg && "
+    "echo \"deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] "
+    "https://packages.redis.io/deb $(lsb_release -cs) main\" | "
+    "sudo tee /etc/apt/sources.list.d/redis.list && "
+    "sudo apt-get update && sudo apt-get install -y redis`\n"
+    "  • Docker:               `docker run -d --name redis -p 6379:6379 "
+    "redis:7-alpine`\n"
+    "  • macOS (Homebrew):     `brew install redis`\n"
+    "Then restart the app."
+)
+
+
+async def getex(client, key, ex):
+    """``client.getex(key, ex=ex)`` with a friendly error on Redis < 6.2.
+
+    The raw ``ResponseError('unknown command \\'GETEX\\'')`` from older
+    Redis builds is cryptic — users hit it in production and spend hours
+    diagnosing. We translate it once, here, and let everything else
+    propagate untouched.
+    """
+    try:
+        return await client.getex(key, ex=ex)
+    except ResponseError as exc:
+        msg = str(exc).lower()
+        if 'unknown command' in msg and 'getex' in msg:
+            raise RuntimeError(_REDIS_TOO_OLD_MSG) from exc
+        raise
 
 
 # Cache hit/miss counters live in two places now:

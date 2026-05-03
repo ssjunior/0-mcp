@@ -44,7 +44,7 @@ from .tenant.tenant import (
     aset_tenant,
     get_api_session,
 )
-from .redis_config import KEY_PREFIX, get_redis
+from .redis_config import KEY_PREFIX, get_redis, getex as redis_getex
 from .settings_helper import (
     get_cookie_id,
     get_read_only,
@@ -417,8 +417,8 @@ class BaseResource(View):
             return existing, session_key
 
         redis = get_redis()
-        raw = await redis.getex(
-            f'{KEY_PREFIX}sessions:{session_key}', ex=SESSION_TTL,
+        raw = await redis_getex(
+            redis, f'{KEY_PREFIX}sessions:{session_key}', ex=SESSION_TTL,
         )
         if not raw:
             return None, None

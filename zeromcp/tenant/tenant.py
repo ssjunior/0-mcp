@@ -10,7 +10,7 @@ from django.apps import apps
 from django.contrib.auth.hashers import check_password
 from django.db.models import Q
 from ..exception import HTTPException
-from ..redis_config import KEY_PREFIX, get_redis
+from ..redis_config import KEY_PREFIX, get_redis, getex as redis_getex
 from .registry import TenantConnectionRegistry
 
 logger = logging.getLogger(__name__)
@@ -354,7 +354,7 @@ async def get_api_session(api_key):
     redis = get_redis()
     key_hash = sha256(api_key.encode('utf-8')).hexdigest()[:16]
     session_key = f'{KEY_PREFIX}api_session:{key_hash}'
-    cached = await redis.getex(session_key, ex=API_SESSION_TTL)
+    cached = await redis_getex(redis, session_key, ex=API_SESSION_TTL)
     if cached:
         session = json.loads(cached)
         # Revalidate on read — a cached entry primed by older code or a

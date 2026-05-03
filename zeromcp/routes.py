@@ -6,7 +6,7 @@ from django.http import HttpResponse, JsonResponse
 
 from .calc_resource import Metrics
 from .openapi import SCALAR_HTML, build_spec
-from .redis_config import KEY_PREFIX, get_redis
+from .redis_config import KEY_PREFIX, get_redis, getex as redis_getex
 from .settings_helper import get_cookie_id, get_session_ttl
 from .util import validate_session_key
 from .tenant.tenant import get_api_session
@@ -33,8 +33,8 @@ async def _has_valid_session(request):
     if not session_key:
         return False
     redis = get_redis()
-    raw = await redis.getex(
-        f'{KEY_PREFIX}sessions:{session_key}', ex=SESSION_TTL,
+    raw = await redis_getex(
+        redis, f'{KEY_PREFIX}sessions:{session_key}', ex=SESSION_TTL,
     )
     return bool(raw)
 

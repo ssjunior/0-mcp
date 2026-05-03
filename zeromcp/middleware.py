@@ -5,7 +5,7 @@ from asgiref.sync import iscoroutinefunction, markcoroutinefunction
 from .settings_helper import get_cookie_id, get_session_ttl
 from .tenant.tenant import apply_session_to_request
 from .util import validate_session_key
-from .redis_config import KEY_PREFIX, get_redis
+from .redis_config import KEY_PREFIX, get_redis, getex as redis_getex
 
 COOKIE_ID = get_cookie_id()
 SESSION_TTL = get_session_ttl()
@@ -26,8 +26,8 @@ class AuthMiddleware:
 
         if session_key:
             redis = get_redis()
-            session = await redis.getex(
-                f'{KEY_PREFIX}sessions:{session_key}', ex=SESSION_TTL,
+            session = await redis_getex(
+                redis, f'{KEY_PREFIX}sessions:{session_key}', ex=SESSION_TTL,
             )
             if session:
                 await apply_session_to_request(request, json.loads(session))
