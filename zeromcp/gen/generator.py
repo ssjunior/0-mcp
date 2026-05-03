@@ -337,6 +337,15 @@ def _pick_sample_resource(grouped):
     return None
 
 
+def pick_sample(config: 'Config', schema: dict | None = None) -> dict | None:
+    """Public counterpart of ``_pick_sample_resource`` — derives the
+    same ``{rest_path, mcp_tool}`` dict from a ``Config`` so the CLI
+    can print copy-pasteable curls after ``generate()`` returns."""
+    schema_tables = {t['name']: t for t in (schema or {}).get('tables', [])}
+    _annotate_columns(schema_tables)
+    return _pick_sample_resource(_group_by_module(config, schema_tables))
+
+
 def _render(env, template_name: str, target: Path, **ctx) -> list[Path]:
     template = env.get_template(template_name)
     target.parent.mkdir(parents=True, exist_ok=True)

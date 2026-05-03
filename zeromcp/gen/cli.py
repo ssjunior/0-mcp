@@ -204,7 +204,7 @@ def _creds_from_dsn(dsn: str) -> dict:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     from .config import build_starter_config
-    from .generator import generate
+    from .generator import generate, pick_sample
     _ensure_db_args(args)
     schema = _friendly_inspect(args.db, args.schema)
     introspection = dataclasses.asdict(schema)
@@ -223,7 +223,35 @@ def _cmd_init(args: argparse.Namespace) -> int:
         f'generated {len(written)} files in {out}',
         file=sys.stderr,
     )
+    _print_next_steps(out, pick_sample(config, schema=introspection))
     return 0
+
+
+def _print_next_steps(out: Path, sample: dict | None) -> None:
+    """Mirror the README's "Try it" section so the user can copy-paste
+    a working request without opening the generated docs."""
+    cd_target = out if out.is_absolute() else Path('./') / out
+    print('\nnext steps:', file=sys.stderr)
+    print(f'  cd {cd_target}', file=sys.stderr)
+    print('  ./run.sh                              # or: python manage.py runserver', file=sys.stderr)
+    if sample:
+        print('', file=sys.stderr)
+        print(f'  # REST — list rows from `{sample["rest_path"]}`:', file=sys.stderr)
+        print(f'  curl -s http://localhost:8000/{sample["rest_path"]} | jq', file=sys.stderr)
+        print('', file=sys.stderr)
+        print('  # MCP — call the matching tool:', file=sys.stderr)
+        print('  curl -s -X POST http://localhost:8000/mcp \\', file=sys.stderr)
+        print("    -H 'Content-Type: application/json' \\", file=sys.stderr)
+        print(
+            f'    -d \'{{"jsonrpc":"2.0","id":1,"method":"tools/call",'
+            f'"params":{{"name":"{sample["mcp_tool"]}","arguments":{{}}}}}}\' | jq',
+            file=sys.stderr,
+        )
+    print(
+        '\nno X-Api-Key needed — DEFAULT_AUTHENTICATED=False on the demo project.',
+        file=sys.stderr,
+    )
+    print(f'see {cd_target}/README.md for full docs.', file=sys.stderr)
 
 
 def _add_filter_args(p: argparse.ArgumentParser) -> None:
