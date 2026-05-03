@@ -296,18 +296,17 @@ class BaseResource(View):
         if self.model:
             fields = []
             for field in self.model._meta.get_fields():
-                if not field.is_relation:
-                    fields.append(field.name)
-                    continue
-
-                if field.concrete and field.many_to_many:
+                if field.is_relation and field.concrete and field.many_to_many:
                     self.m2m_fields.append(field.name)
                     continue
 
-            all_fields = [
-                field.name for field in self.model._meta.local_fields
-            ]
-            self.all_fields = all_fields + self.m2m_fields
+            for field in self.model._meta.local_fields:
+                # ForeignKey/OneToOne: expose the underlying ``*_id`` column
+                # (``created_by_id``, ``owner_id``) so the default LIST shape
+                # round-trips FK references without an explicit ``list_fields``.
+                fields.append(field.attname if field.is_relation else field.name)
+
+            self.all_fields = list(fields) + self.m2m_fields
 
             self.fields = fields
             self.list_fields = self.list_fields or fields
@@ -1509,11 +1508,11 @@ class BaseResource(View):
         user = self.user
 
         if user:
-            if 'created_by' in self.all_fields:
+            if 'created_by_id' in self.all_fields:
                 body['created_by_id'] = user['id']
-            if 'updated_by' in self.all_fields:
+            if 'updated_by_id' in self.all_fields:
                 body['updated_by_id'] = user['id']
-            if 'owner' in self.all_fields:
+            if 'owner_id' in self.all_fields:
                 if self.allow_owner_override:
                     body['owner_id'] = body.get('owner_id', user['id'])
                 else:
