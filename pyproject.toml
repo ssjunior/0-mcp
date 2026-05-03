@@ -71,4 +71,12 @@ include = ["zeromcp*"]
 exclude = ["site*", "tests*", "dist*", "build*"]
 
 [tool.setuptools.package-data]
-"zeromcp.gen" = ["templates/**/*.j2", "templates/**/*"]
+# Globs starting with ``**/*`` skip files whose names begin with a dot
+# (``.env.example.j2``, ``.gitignore.j2``). Enumerate them explicitly
+# so the generator's dotfile templates make it into the sdist + wheel.
+"zeromcp.gen" = [
+    "templates/**/*.j2",
+    "templates/**/*",
+    "templates/.env.example.j2",
+    "templates/.gitignore.j2",
+]
