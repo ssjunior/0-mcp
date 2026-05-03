@@ -1,4 +1,4 @@
-"""OpenAPI 3.1 spec generation from `endpoints` registered via `get_routes`.
+"""OpenAPI 3.0.3 spec generation from `endpoints` registered via `get_routes`.
 
 For each resource:
 - If `create_schema`/`update_schema`/`list_schema` is set, generate paths
