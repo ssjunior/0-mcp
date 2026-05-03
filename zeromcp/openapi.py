@@ -294,7 +294,9 @@ def _list_parameters(view_cls):
     return params
 
 
-def build_spec(endpoints, title='0-mcp', version='1.0.0', description=None):
+def build_spec(endpoints, title='0-mcp', version=None, description=None):
+    if version is None:
+        from . import __version__ as version
     components = {'schemas': {}, 'securitySchemes': {
         'cookieAuth': {'type': 'apiKey', 'in': 'cookie', 'name': COOKIE_ID},
         'apiKeyAuth': {'type': 'apiKey', 'in': 'header', 'name': 'X-Api-Key'},

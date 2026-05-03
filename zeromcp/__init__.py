@@ -7,6 +7,12 @@ project and the imports succeed normally; users who only install for
 ``0-mcp init`` get a working CLI without a stray ``ModuleNotFoundError``
 on ``settings``.
 """
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+try:
+    __version__ = _pkg_version('django-zeromcp')
+except PackageNotFoundError:        # editable/dev checkout without metadata
+    __version__ = '0.0.0+local'
 try:
     from zeromcp.auth import make_token, validate_token, validate_token_async  # noqa: F401
     from zeromcp.base import BaseResource  # noqa

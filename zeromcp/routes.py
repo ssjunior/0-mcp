@@ -46,8 +46,10 @@ def get_routes(endpoints, **kwargs):
     to make them anonymous; default is ``False`` (requires the same auth as
     the rest of the API — session cookie or X-Api-Key).
     """
+    from . import __version__ as _zeromcp_version
+
     spec_title = kwargs.get('title', '0-mcp')
-    spec_version = kwargs.get('version', '1.0.0')
+    spec_version = kwargs.get('version', _zeromcp_version)
     spec_description = kwargs.get('description')
     docs_public = kwargs.get('docs_public', False)
 
