@@ -252,12 +252,12 @@ def generate(
     # commit. ``.env`` is rendered with the credentials the user
     # actually typed when they ran ``0-mcp init``.
     written += _render(
-        env, '.env.example.j2', output_dir / '.env.example',
+        env, 'env.example.j2', output_dir / '.env.example',
         config=config, creds=None,
     )
     if creds:
         written += _render(
-            env, '.env.example.j2', output_dir / '.env',
+            env, 'env.example.j2', output_dir / '.env',
             config=config, creds=creds,
         )
     sample = _pick_sample_resource(grouped)
@@ -265,7 +265,7 @@ def generate(
         env, 'README.md.j2', output_dir / 'README.md',
         config=config, sample=sample,
     )
-    written += _render(env, '.gitignore.j2', output_dir / '.gitignore', config=config)
+    written += _render(env, 'gitignore.j2', output_dir / '.gitignore', config=config)
     run_sh = output_dir / 'run.sh'
     written += _render(env, 'run.sh.j2', run_sh, config=config)
     run_sh.chmod(0o755)
