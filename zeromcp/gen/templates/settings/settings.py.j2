@@ -116,6 +116,17 @@ MCP = {
     # 'MCP_LIST_OMIT_NULL': False,          # applies to LIST responses
     # 'MCP_EDIT_OMIT_NULL': False,          # applies to GET/PATCH responses
 
+    # ── Credential-path auto-defense ─────────────────────────────────
+    # Tight per-IP bucket applied on top of the regular API limits to
+    # any path matching one of these segments (segment-based, so nested
+    # paths like ``/login/forgot`` and ``/user/change_password`` are
+    # covered). Framework defaults shown — uncomment to override.
+    # NOTE: setting this REPLACES the framework default, not extends.
+    # Copy the full list and add your extras (e.g. ``/activate``).
+    # 'CREDENTIAL_PATHS': ['/forgot', '/change_password', '/signup',
+    #                      '/reset', '/recover', '/register'],
+    # 'CREDENTIAL_RATE_LIMIT': {'limit': 5, 'window': 30},   # 5 hits / 30s per IP
+
     # ── Rate limit & abuse blocking ──────────────────────────────────
     # Per-IP windows. Each list is "if more than ``limit`` requests in
     # ``interval`` ms, slow down or block". ``api`` covers regular

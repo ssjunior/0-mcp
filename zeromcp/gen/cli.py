@@ -20,6 +20,7 @@ import argparse
 import dataclasses
 import json
 import sys
+import time
 from pathlib import Path
 
 
@@ -115,6 +116,16 @@ def _ensure_db_args(args: argparse.Namespace) -> None:
             args.writable = _yes_no(
                 'Generate writable resources (POST/PATCH/DELETE)?',
             )
+            if not args.writable:
+                print(
+                    '\n  ⚠  read-only mode blocks every non-GET request, '
+                    'including the\n'
+                    '     MCP JSON-RPC endpoint (POST /mcp). Agents will '
+                    'get 405 on every\n'
+                    '     tools/call. Use --writable (or rerun and answer '
+                    '"y" here) if you\n'
+                    '     need a working MCP server.\n',
+                )
 
 
 def _friendly_inspect(dsn: str, schema_name: str | None):
@@ -203,9 +214,10 @@ def _creds_from_dsn(dsn: str) -> dict:
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
-    from .config import build_starter_config
+    from .config import build_starter_config, _is_django_system
     from .generator import generate, pick_sample
     _ensure_db_args(args)
+    started = time.monotonic()
     schema = _friendly_inspect(args.db, args.schema)
     introspection = dataclasses.asdict(schema)
     config = build_starter_config(
@@ -216,6 +228,11 @@ def _cmd_init(args: argparse.Namespace) -> int:
         django_managed=args.django_managed,
     )
     exposed = sum(1 for t in config.tables.values() if t.expose)
+    hidden_system = sum(
+        1 for t in config.tables.values()
+        if not t.expose and _is_django_system(t.db_table)
+    )
+    hidden_other = len(config.tables) - exposed - hidden_system
     out = Path(args.output)
     written = generate(config, out, schema=introspection, creds=_creds_from_dsn(args.db))
     print(
@@ -223,11 +240,39 @@ def _cmd_init(args: argparse.Namespace) -> int:
         f'generated {len(written)} files in {out}',
         file=sys.stderr,
     )
-    _print_next_steps(out, pick_sample(config, schema=introspection))
+    if hidden_system:
+        plural = '' if hidden_system == 1 else 's'
+        print(
+            f'  ↳ {hidden_system} internal Django table{plural} hidden '
+            f'(django_*, auth_*) — not an error.',
+            file=sys.stderr,
+        )
+    if hidden_other:
+        plural = '' if hidden_other == 1 else 's'
+        print(
+            f'  ↳ {hidden_other} table{plural} excluded by --include / --exclude rules.',
+            file=sys.stderr,
+        )
+    _print_next_steps(
+        out,
+        pick_sample(config, schema=introspection),
+        read_only=not args.writable,
+    )
+    elapsed = _format_elapsed(time.monotonic() - started)
+    print(f'\n✨ done in {elapsed}.', file=sys.stderr)
     return 0
 
 
-def _print_next_steps(out: Path, sample: dict | None) -> None:
+def _format_elapsed(seconds: float) -> str:
+    """Human-readable wall time. Sub-minute → ``12.4s``; minute+ →
+    ``1m 23s`` so the user can eyeball "fast/slow" at a glance."""
+    if seconds < 60:
+        return f'{seconds:.1f}s'
+    minutes, secs = divmod(int(seconds), 60)
+    return f'{minutes}m {secs:02d}s'
+
+
+def _print_next_steps(out: Path, sample: dict | None, *, read_only: bool = False) -> None:
     """Mirror the README's "Try it" section so the user can copy-paste
     a working request without opening the generated docs."""
     cd_target = out if out.is_absolute() else Path('./') / out
@@ -251,6 +296,16 @@ def _print_next_steps(out: Path, sample: dict | None) -> None:
         '\nno X-Api-Key needed — DEFAULT_AUTHENTICATED=False on the demo project.',
         file=sys.stderr,
     )
+    if read_only:
+        print(
+            '\n⚠  this project was generated read-only — MCP `tools/call` '
+            'requests will\n'
+            '   return 405 because the endpoint is POST. Re-run with '
+            '`--writable` (or\n'
+            '   drop `MCP[\'READ_ONLY\']` in settings.py) to expose a '
+            'working MCP server.',
+            file=sys.stderr,
+        )
     print(f'see {cd_target}/README.md for full docs.', file=sys.stderr)
 
 

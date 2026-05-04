@@ -187,6 +187,13 @@ generated `settings.py` carries `MCP = {'READ_ONLY': True, ...}`, which
 makes every non-`GET` request return `405` across all resources — REST
 and MCP alike. To allow writes, drop the key (or set it to `False`)
 and the per-resource `allowed_methods` defaults take over.
+
+> ⚠ **MCP is effectively disabled in this mode.** The MCP protocol is
+> JSON-RPC over `POST /mcp`, so every `tools/call` (and `tools/list`,
+> and any other agent request) will return `405`. The REST `GET`
+> endpoints still work for read-only consumption. If you need a
+> working MCP server, regenerate with `--writable` or remove the
+> `READ_ONLY` key from `settings.py`.
 {% endif %}
 
 ## Auto-applied opinions
