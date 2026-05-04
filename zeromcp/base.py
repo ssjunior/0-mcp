@@ -47,6 +47,8 @@ from .tenant.tenant import (
 from .redis_config import KEY_PREFIX, get_redis, getex as redis_getex
 from .settings_helper import (
     get_cookie_id,
+    get_credential_paths,
+    get_credential_rate_limit,
     get_read_only,
     get_session_ttl,
     get_setting,
@@ -66,6 +68,16 @@ CACHE_TTL_ENABLE = get_setting('CACHE_TTL_ENABLE', default=True)
 MCP_LIST_OMIT_NULL = get_setting('MCP_LIST_OMIT_NULL', default=False)
 MCP_EDIT_OMIT_NULL = get_setting('MCP_EDIT_OMIT_NULL', default=False)
 DEFAULT_AUTHENTICATED = get_setting('DEFAULT_AUTHENTICATED', default=True)
+CREDENTIAL_PATHS = get_credential_paths()
+CREDENTIAL_RATE_LIMIT = get_credential_rate_limit()
+# Pre-compile path-segment regex per entry. ``startswith`` was too
+# strict — projects often nest credential paths (``/login/forgot``,
+# ``/user/change_password``). Segment match catches them; ``/forgotten``
+# stays out because the segment ``forgotten`` ≠ ``forgot``.
+_CREDENTIAL_PATTERNS = [
+    re.compile(rf'(^|/){re.escape(p.strip("/"))}(/|$)')
+    for p in CREDENTIAL_PATHS if p.strip('/')
+]
 RATE_LIMITS = get_setting('RATE_LIMITS', default={
     'api': [
         {'interval': 1000, 'limit': 4},
@@ -115,6 +127,32 @@ class BaseResource(View):
     authenticated = DEFAULT_AUTHENTICATED
     allowed_methods = ['delete', 'get', 'patch', 'post']
     routes = None
+
+    # Declarative per-resource rate-limit buckets. Each entry is a dict::
+    #
+    #     {'key': callable | str,    # callable(self) -> str, or fixed str
+    #      'limit': int,             # max hits in the window
+    #      'window': int,            # window length in seconds
+    #      'name': str (optional)}   # bucket name suffix; default 'default'
+    #
+    # Buckets run in addition to the global ``api/login/abuse`` limits and
+    # the credential-path auto-defense — first one to exceed raises 429.
+    # Keys returning ``None`` are skipped (e.g. ``user['id']`` before the
+    # auth handshake completes), so per-user buckets only fire on
+    # authenticated paths.
+    #
+    # Multi-window combos cover both rate-limit and lockout patterns::
+    #
+    #     class ChangePasswordResource(BaseResource):
+    #         rate_limits = [
+    #             # short — burst protection
+    #             {'name': 'short', 'key': lambda r: r.user['id'],
+    #              'limit': 5,  'window': 60},
+    #             # long  — lockout (50 attempts in 24h = blocked 24h)
+    #             {'name': 'lockout', 'key': lambda r: r.user['id'],
+    #              'limit': 50, 'window': 86400},
+    #         ]
+    rate_limits = None
 
     # OpenAPI / MCP metadata. `summary` becomes the tag summary; `description`
     # becomes the long-form description in the generated spec.
@@ -379,6 +417,20 @@ class BaseResource(View):
 
         await self.check_is_blocked(self.identifier)
 
+        # Credential-path auto-defense: per-IP narrow window. Runs first
+        # so it covers paths nested under ``/login`` too — segment match
+        # (see ``_CREDENTIAL_PATTERNS``) catches ``/login/forgot`` and
+        # ``/user/change_password``. ``/forgotten`` is *not* matched
+        # (different segment).
+        if any(rx.search(request.path) for rx in _CREDENTIAL_PATTERNS):
+            cred = CREDENTIAL_RATE_LIMIT
+            result = await RateLimiter.check_bucket(
+                'credential', self.identifier,
+                cred['limit'], cred['window'] * 1000,
+            )
+            if result['rate_limited']:
+                raise HTTPException(429, 'Slow down, too many requests. You will be blocked.')
+
         if request.path.startswith('/login'):
             result = await RateLimiter.login_limited(self.identifier, RATE_LIMITS)
             if result['rate_limited']:
@@ -390,6 +442,29 @@ class BaseResource(View):
             await self.block(self.identifier)
         if result['rate_limited']:
             raise HTTPException(429, 'Slow down, too many requests. You will be blocked.')
+
+    async def _enforce_resource_rate_limits(self):
+        """Declarative ``self.rate_limits`` buckets — runs after auth so
+        keys derived from ``self.user`` resolve. Keys returning ``None``
+        are skipped (e.g. unauthenticated endpoints that opt-in to a
+        per-user bucket as well — only fires when a user is present)."""
+        if not self.rate_limits or getattr(django_settings, 'DEBUG', False):
+            return
+        for spec in self.rate_limits:
+            key = spec['key']
+            if callable(key):
+                try:
+                    key = key(self)
+                except Exception:
+                    key = None
+            if key is None:
+                continue
+            bucket = f'{type(self).__name__}.{spec.get("name", "default")}'
+            result = await RateLimiter.check_bucket(
+                bucket, str(key), spec['limit'], spec['window'] * 1000,
+            )
+            if result['rate_limited']:
+                raise HTTPException(429, 'Slow down, too many requests. You will be blocked.')
 
     async def _authenticate(self, request):
         """Resolve user/account from API key or session cookie. Returns
@@ -736,6 +811,8 @@ class BaseResource(View):
 
         if ALLOWED_ORIGINS:
             self.get_allowed_domain(request)
+
+        await self._enforce_resource_rate_limits()
 
         if session and session.get('account'):
             self.account_db = await aset_tenant(session['account']['id'])

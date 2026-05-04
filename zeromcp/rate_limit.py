@@ -1,4 +1,5 @@
 import logging
+import secrets
 import time
 
 from . import blocking
@@ -157,6 +158,39 @@ class RateLimit:
     async def login_limited(self, identifier, limits):
         """Check rate limits for login attempts."""
         return await self.check_limits(identifier, limits, "login")
+
+    async def check_bucket(self, bucket, key, limit, window_ms):
+        """Generic single-bucket rate-limit check.
+
+        Sliding window over a Redis sorted set. Each call records a hit
+        and returns the count for the window. Used by:
+          • declarative ``BaseResource.rate_limits`` (per-resource buckets,
+            arbitrary keys — e.g. ``email``, ``user_id``);
+          • the credential-path auto-defense (per-IP, narrow window
+            applied to ``/forgot``, ``/change_password``, ``/signup``).
+        Independent of the ``api/login/abuse`` buckets handled by
+        ``check_limits`` — does not write to the abuse namespace and
+        does not auto-block.
+        """
+        redis = get_redis()
+        now = self.current_milli_time()
+        redis_key = f'{KEY_PREFIX}rate_limit:{bucket}:{window_ms}:{key}'
+        # Unique member — multiple hits in the same millisecond would
+        # otherwise collapse to a single sorted-set entry and undercount.
+        member = f'req_{now}_{secrets.token_hex(4)}'
+        p = redis.pipeline()
+        p.zremrangebyscore(redis_key, 0, now - window_ms)
+        p.zadd(redis_key, {member: now})
+        p.zcard(redis_key)
+        p.expire(redis_key, int(window_ms / 1000) + 1)
+        results = await p.execute()
+        count = results[2]
+        return {
+            'rate_limited': count > limit,
+            'count': count,
+            'limit': limit,
+            'retry_after': max(int(window_ms / 1000), 1),
+        }
 
 
 RateLimiter = RateLimit()

@@ -59,3 +59,48 @@ def get_api_session_ttl():
 
 def get_read_only():
     return get_setting('READ_ONLY', default=False)
+
+
+def get_credential_paths():
+    """Path-segment list that triggers the credential-path rate-limit
+    auto-defense. Anything matching one of these segments — at the
+    root or nested anywhere in the path — gets the tight
+    ``CREDENTIAL_RATE_LIMIT`` bucket per-IP on top of the regular API
+    bucket.
+
+    Match is segment-based (regex ``(^|/){p}(/|$)``), so:
+      * ``/forgot``               → matched
+      * ``/login/forgot``         → matched
+      * ``/user/change_password`` → matched
+      * ``/forgotten``            → NOT matched (different segment)
+
+    Configure with leading slash for readability — it's stripped at
+    match time. Set to ``[]`` in ``MCP`` to disable.
+
+    **Override semantics:** ``MCP['CREDENTIAL_PATHS']`` *replaces* the
+    framework default — does not merge. To add project-specific paths
+    while keeping the defaults, copy the default list and extend::
+
+        MCP = {
+            'CREDENTIAL_PATHS': [
+                '/forgot', '/change_password', '/signup',
+                '/reset', '/recover', '/register',  # default
+                '/activate', '/email_validate',     # extras
+            ],
+        }
+    """
+    return get_setting('CREDENTIAL_PATHS', default=[
+        '/forgot', '/change_password', '/signup',
+        '/reset', '/recover', '/register',
+    ])
+
+
+def get_credential_rate_limit():
+    """Per-IP rate-limit applied to ``CREDENTIAL_PATHS``. ``window`` is
+    in seconds. Tighter than the default ``api`` bucket because these
+    paths are the natural targets for credential-stuffing and password
+    reset abuse — but loose enough to absorb legitimate retries
+    (re-send email button, NAT-shared offices)."""
+    return get_setting('CREDENTIAL_RATE_LIMIT', default={
+        'limit': 5, 'window': 30,
+    })
