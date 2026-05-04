@@ -1230,6 +1230,19 @@ class BaseResource(View):
         return results
 
     async def return_result(self, result):
+        if isinstance(result, HttpResponse):
+            # A subclass override (``update_obj``, ``get_obj``,
+            # ``alter_detail``) returned a fully-rendered HttpResponse
+            # instead of the dict the framework's serialization path
+            # expects. Iterating it would walk the response headers and
+            # ``.pop()`` would crash with a confusing ``AttributeError``;
+            # surface a clear contract message instead.
+            raise TypeError(
+                f'{type(self).__name__}.update_obj / get_obj / alter_detail '
+                f'returned an HttpResponse ({type(result).__name__}); '
+                f'these hooks must return a dict (or raise HTTPException). '
+                f'The framework wraps the dict in JSON itself.'
+            )
         for key in list(result):
             if (
                 self.edit_fields and
