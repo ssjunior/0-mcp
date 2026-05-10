@@ -4,10 +4,14 @@ import re
 from django.urls import path, re_path
 from django.http import HttpResponse, JsonResponse
 
+from . import bearer as _bearer
 from .calc_resource import Metrics
 from .openapi import SCALAR_HTML, build_spec
 from .redis_config import KEY_PREFIX, get_redis, getex as redis_getex
-from .settings_helper import get_cookie_id, get_session_ttl
+from .settings_helper import (
+    get_cookie_id, get_oauth_as_url, get_require_valid_bearer,
+    get_session_ttl,
+)
 from .util import validate_session_key
 from .tenant.tenant import get_api_session
 
@@ -23,7 +27,23 @@ def get_route(route, view):
 
 async def _has_valid_session(request):
     """Lightweight auth check for /docs and /openapi.json. Accepts a valid
-    session cookie or X-Api-Key. Avoids importing BaseResource here."""
+    Bearer token, session cookie, or X-Api-Key — same precedence and
+    strict-mode rules as ``BaseResource._authenticate``. Avoids importing
+    BaseResource here."""
+    code, session = await _bearer.resolve_bearer_session(
+        request.headers.get('Authorization'),
+    )
+    if code == _bearer.OK:
+        return True
+    # Resolver crashed — same policy as BaseResource: never fall back.
+    if code == _bearer.FAIL_EXCEPTION:
+        return False
+    # Strict mode applies here too, but only if Bearer is actually
+    # configured — avoids breaking projects that flip the flag without
+    # a resolver.
+    if code != _bearer.NO_RESOLVER and get_require_valid_bearer():
+        return False
+
     api_key = request.headers.get('X-Api-Key')
     if api_key:
         session = await get_api_session(api_key)
@@ -97,6 +117,20 @@ def get_routes(endpoints, **kwargs):
         path('docs', docs_scalar),
         path('', index),
     ]
+
+    # RFC 9728 — only mount when an external Authorization Server is
+    # declared. Validating eagerly here means a half-configured project
+    # fails at boot, not at the first agent request.
+    if get_oauth_as_url():
+        metadata = _bearer.discovery_metadata()
+
+        async def oauth_protected_resource(request, *args, **kwargs):
+            return JsonResponse(metadata, json_dumps_params={'indent': 2})
+
+        routes.append(path(
+            '.well-known/oauth-protected-resource',
+            oauth_protected_resource,
+        ))
 
     if kwargs.get('mcp'):
         from .mcp.resource import mcp_view

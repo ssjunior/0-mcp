@@ -300,6 +300,7 @@ def build_spec(endpoints, title='0-mcp', version=None, description=None):
     components = {'schemas': {}, 'securitySchemes': {
         'cookieAuth': {'type': 'apiKey', 'in': 'cookie', 'name': COOKIE_ID},
         'apiKeyAuth': {'type': 'apiKey', 'in': 'header', 'name': 'X-Api-Key'},
+        'bearerAuth': {'type': 'http', 'scheme': 'bearer'},
     }}
     paths = {}
     tags = []
@@ -329,7 +330,9 @@ def build_spec(endpoints, title='0-mcp', version=None, description=None):
         'info': {'title': title, 'version': version},
         'paths': paths,
         'components': components,
-        'security': [{'cookieAuth': []}, {'apiKeyAuth': []}],
+        'security': [
+            {'cookieAuth': []}, {'apiKeyAuth': []}, {'bearerAuth': []},
+        ],
         'tags': tags,
     }
     if description:

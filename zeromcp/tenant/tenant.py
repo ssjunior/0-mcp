@@ -367,14 +367,14 @@ async def get_api_session(api_key):
     session = await resolver(api_key)
     if session is None:
         return None
-    if not _validate_session_shape(session, resolver):
+    if not validate_session_shape(session, resolver):
         return None
 
     await redis.setex(session_key, API_SESSION_TTL, json.dumps(session))
     return session
 
 
-def _validate_session_shape(session, resolver):
+def validate_session_shape(session, resolver):
     """Strict shape check for resolver output (and cached entries).
 
     Required: ``session`` is a dict with a ``user`` dict.
@@ -420,6 +420,12 @@ def _validate_session_shape(session, resolver):
             )
             return False
     return True
+
+
+# Compat alias — the function was private (``_validate_session_shape``)
+# in 1.3.x. Keep the underscore name working in case any consumer
+# imported it.
+_validate_session_shape = validate_session_shape
 
 
 def set_tenant(id):

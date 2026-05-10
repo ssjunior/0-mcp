@@ -104,3 +104,48 @@ def get_credential_rate_limit():
     return get_setting('CREDENTIAL_RATE_LIMIT', default={
         'limit': 5, 'window': 30,
     })
+
+
+def get_bearer_resolver():
+    """Dotted path or callable that resolves a bearer token to a session
+    dict. Same shape as the X-Api-Key resolver: ``{'user': {...},
+    'account': {...}}`` (account is multi-tenant only).
+
+    When unset, the framework treats ``Authorization: Bearer`` headers
+    as absent — behavior identical to 1.3.x.
+    """
+    return get_setting('BEARER_RESOLVER')
+
+
+def get_require_valid_bearer():
+    """Strict mode for Bearer auth on routes with ``authenticated=True``.
+
+    When ``True``: the only accepted credential is a valid bearer token.
+    Missing or malformed Bearer headers, and tokens the resolver rejects,
+    return 401 — fallback to ``X-Api-Key`` and cookie session is disabled.
+    Public routes (``authenticated=False``) are unaffected.
+
+    When ``False`` (default): missing or invalid bearer falls back to the
+    other auth methods. A resolver exception still maps to 401 — that's
+    operator/resolver bug, not a malformed credential.
+    """
+    return get_setting('REQUIRE_VALID_BEARER', default=False)
+
+
+def get_oauth_as_url():
+    """URL of the external OAuth Authorization Server.
+
+    When set, the framework mounts a discovery endpoint at
+    ``/.well-known/oauth-protected-resource`` (RFC 9728) so MCP clients
+    can locate the AS. ``OAUTH_RESOURCE_URL`` becomes mandatory.
+    """
+    return get_setting('OAUTH_AS_URL')
+
+
+def get_oauth_resource_url():
+    """Canonical resource identifier emitted in the RFC 9728 metadata.
+
+    Required when ``OAUTH_AS_URL`` is set. Should be the absolute URL
+    of this resource server (e.g. ``https://api.cliente.com``).
+    """
+    return get_setting('OAUTH_RESOURCE_URL')

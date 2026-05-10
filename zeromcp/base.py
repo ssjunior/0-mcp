@@ -20,6 +20,7 @@ import operator
 import re
 
 from .auth import validate_token_async
+from . import bearer as _bearer
 from .blocking import block as block_identifier
 from .blocking import is_blocked
 from .client_ip import get_client_ip
@@ -50,6 +51,7 @@ from .settings_helper import (
     get_credential_paths,
     get_credential_rate_limit,
     get_read_only,
+    get_require_valid_bearer,
     get_session_ttl,
     get_setting,
     get_token_max_drift_ms,
@@ -467,14 +469,49 @@ class BaseResource(View):
                 raise HTTPException(429, 'Slow down, too many requests. You will be blocked.')
 
     async def _authenticate(self, request):
-        """Resolve user/account from API key or session cookie. Returns
-        the loaded session dict (or None) and the validated session key
-        string (used by ``session_cache``; only returned when a real
-        session was loaded — never for an unmatched cookie).
+        """Resolve user/account from Bearer, API key, or session cookie.
 
-        Both paths populate the same ``request.*`` shape via the shared
-        :func:`apply_session_to_request` helper, so downstream code sees
-        identical attributes regardless of auth method."""
+        Returns the loaded session dict (or None) and the validated
+        session key string (used by ``session_cache``; only returned
+        when a real session was loaded — never for an unmatched cookie).
+
+        Order of precedence:
+
+        1. ``Authorization: Bearer <token>`` — opt-in via ``BEARER_RESOLVER``.
+        2. ``X-Api-Key`` header.
+        3. Session cookie.
+
+        All three paths populate the same ``request.*`` shape via the
+        shared :func:`apply_session_to_request` helper, so downstream
+        code sees identical attributes regardless of auth method.
+
+        ``REQUIRE_VALID_BEARER=True`` only kicks in for routes with
+        ``self.authenticated=True`` — public routes are never blocked
+        by strict mode.
+        """
+        # 1. Bearer
+        code, session = await _bearer.resolve_bearer_session(
+            request.headers.get('Authorization'),
+        )
+        if code == _bearer.OK:
+            self._activate_session(session)
+            await apply_session_to_request(request, session)
+            return session, None
+        # Public routes: never blocked by Bearer outcomes — fall
+        # through to the existing flows (or anonymous).
+        # ``NO_RESOLVER`` (``BEARER_RESOLVER`` unset) also short-circuits
+        # to the existing flows: a project that hasn't opted into
+        # Bearer keeps 1.3.x behaviour even if it accidentally sets
+        # ``REQUIRE_VALID_BEARER=True``.
+        if self.authenticated and code != _bearer.NO_RESOLVER:
+            if code == _bearer.FAIL_EXCEPTION:
+                # Operator/resolver bug — never silently fall back.
+                raise HTTPException(401, 'Not authorized')
+            if get_require_valid_bearer():
+                # Strict mode: any non-OK on an authed route → 401.
+                raise HTTPException(401, 'Not authorized')
+
+        # 2. X-Api-Key
         if request.headers.get('X-Api-Key'):
             session = await get_api_session(request.headers.get('X-Api-Key'))
             if session:

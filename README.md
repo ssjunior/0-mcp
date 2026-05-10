@@ -95,7 +95,7 @@ Add to `claude_desktop_config.json`:
 
 Restart Claude Desktop. The agent now has typed tools for every resource you exposed.
 
-For HTTP-based agents (Cursor, custom copilots, anything else that speaks JSON-RPC over POST), the same tools live at `POST /mcp` behind an `X-Api-Key`:
+For HTTP-based agents (Cursor, custom copilots, anything else that speaks JSON-RPC over POST), the same tools live at `POST /mcp`. HTTP MCP accepts `X-Api-Key` by default; opt into `Authorization: Bearer <token>` by setting `MCP['BEARER_RESOLVER']`.
 
 ```bash
 curl -X POST http://localhost:8000/mcp \
